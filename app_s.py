@@ -15,7 +15,9 @@ app = Flask(__name__)
 AZURE_API_KEY = os.getenv('AZURE_API_KEY')
 AZURE_TTS_ENDPOINT = os.getenv('AZURE_TTS_ENDPOINT')
 AZURE_TTS_API_URL = os.getenv('AZURE_TTS_API_URL')
-
+AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
+AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
+AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'
 
 def get_access_token():
     headers = {
@@ -24,7 +26,6 @@ def get_access_token():
     response = requests.post(AZURE_TTS_ENDPOINT, headers=headers)
     response.raise_for_status()
     return response.text
-
 
 def generate_speech(text, access_token):
     headers = {
@@ -46,11 +47,9 @@ def generate_speech(text, access_token):
     response.raise_for_status()
     return response.content
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 @app.route('/shadow', methods=['POST'])
 def shadow():
@@ -77,6 +76,38 @@ def shadow():
 
     return jsonify({'audio': audio_base64})
 
+@app.route('/generate_sentences', methods=['POST'])
+def generate_sentences():
+    vocab = request.form['vocab']
+    words = vocab.split(',')
+    sentences = []
+
+    headers = {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY,
+    }
+
+    for _ in range(5):
+        prompt = f"Create a sentence using the following words: {', '.join(words)}"
+        data = {
+            "messages": [
+                {"role": "system", "content": "You are an assistant that creates sentences using provided words."},
+                {"role": "user", "content": prompt}
+            ]
+        }
+        response = requests.post(
+            f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+            headers=headers,
+            json=data
+        )
+        if response.status_code == 200:
+            sentence = response.json()["choices"][0]["message"]["content"].strip()
+            sentences.append(sentence)
+        else:
+            return jsonify({"error": response.json()}), response.status_code
+
+    return jsonify({"sentences": sentences})
 
 if __name__ == '__main__':
     app.run(debug=True)
+

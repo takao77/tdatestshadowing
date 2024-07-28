@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadowing Practice</title>
+  <!-- Google Fonts: Roboto -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Bootstrap CSS -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: black;
+      color: white;
+      font-family: 'Roboto', sans-serif;
+    }
+    .container {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px;
+      border-radius: 10px;
+      margin-top: 50px;
+    }
+    .audio-player {
+      margin-top: 10px;
+    }
+    h1 {
+      font-weight: 700;
+    }
+    label, .btn {
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="text-center">Shadowing Practice</h1>
+    <form id="shadow-form" class="mt-4">
+      <div class="form-group">
+        <label for="text">Enter text for shadowing:</label>
+        <input type="text" id="text" name="text" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">
+        <i class="fas fa-microphone"></i> Submit
+      </button>
+    </form>
+    <div id="audio-players" class="mt-4"></div>
+  </div>
+
+  <!-- jQuery and Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <script>
+    document.getElementById('shadow-form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      const response = await fetch('/shadow', {
+        method: 'POST',
+        body: formData,
+      });
+      const result = await response.json();
+
+      const audioPlayersDiv = document.getElementById('audio-players');
+      audioPlayersDiv.innerHTML = '';
+
+      if (result.error) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger';
+        errorDiv.textContent = 'Error: ' + result.error;
+        audioPlayersDiv.appendChild(errorDiv);
+      } else {
+        const audioPlayer = document.createElement('audio');
+        audioPlayer.controls = true;
+        audioPlayer.className = 'audio-player';
+        audioPlayer.src = 'data:audio/mp3;base64,' + result.audio;
+        audioPlayersDiv.appendChild(audioPlayer);
+      }
+    });
+  </script>
+</body>
+</html>
+

@@ -1,9 +1,13 @@
 #!/bin/bash
 
-# Install ffmpeg
-apt-get update && apt-get install -y ffmpeg
+# Install ffmpeg from apt.txt
+if [ -f "apt.txt" ]; then
+    while read -r package; do
+        apt-get -y install "$package"
+    done < apt.txt
+fi
 
-# Start the Gunicorn server
+# Start Gunicorn server
 gunicorn --bind=0.0.0.0:8000 app_s:app
 
 

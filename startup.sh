@@ -1,16 +1,25 @@
 #!/bin/bash
 
-# Update package list and install ffmpeg and ffprobe
-apt-get update
-apt-get install -y ffmpeg
+# Update and install ffmpeg
+apt-get update && apt-get install -y ffmpeg
 
-# Ensure ffmpeg and ffprobe are in the PATH
-export PATH=$PATH:/usr/bin
+# Check if ffmpeg and ffprobe are installed
+if ! command -v ffmpeg &> /dev/null
+then
+    echo "ffmpeg could not be found"
+    exit 1
+fi
 
-# Verify installation (optional, can be removed after confirmation)
-echo "ffmpeg version: $(ffmpeg -version)"
-echo "ffprobe version: $(ffprobe -version)"
+if ! command -v ffprobe &> /dev/null
+then
+    echo "ffprobe could not be found"
+    exit 1
+fi
 
-# Start Gunicorn server
-gunicorn --bind=0.0.0.0:8000 app_s:app
+# Add /usr/bin to PATH if not already present
+if [[ ":$PATH:" != *":/usr/bin:"* ]]; then
+    export PATH=$PATH:/usr/bin
+fi
 
+# Start the application using Gunicorn
+exec gunicorn --bind=0.0.0.0:8000 app_s:app

@@ -68,6 +68,7 @@
           </button>
         </form>
         <div id="sentence-outputs" class="mt-4"></div>
+        <div id="audio-players-vocab" class="mt-4"></div>
       </div>
     </div>
   </div>
@@ -112,7 +113,9 @@
       const result = await response.json();
 
       const sentenceOutputsDiv = document.getElementById('sentence-outputs');
+      const audioPlayersVocabDiv = document.getElementById('audio-players-vocab');
       sentenceOutputsDiv.innerHTML = '';
+      audioPlayersVocabDiv.innerHTML = '';
 
       if (result.error) {
         const errorDiv = document.createElement('div');
@@ -120,12 +123,16 @@
         errorDiv.textContent = 'Error: ' + (result.error.message || JSON.stringify(result.error));
         sentenceOutputsDiv.appendChild(errorDiv);
       } else {
-        result.sentences.forEach(sentence => {
-          const sentenceDiv = document.createElement('div');
-          sentenceDiv.className = 'alert alert-info';
-          sentenceDiv.textContent = sentence;
-          sentenceOutputsDiv.appendChild(sentenceDiv);
-        });
+        const sentenceDiv = document.createElement('div');
+        sentenceDiv.className = 'alert alert-info';
+        sentenceDiv.textContent = result.sentence;
+        sentenceOutputsDiv.appendChild(sentenceDiv);
+
+        const audioPlayer = document.createElement('audio');
+        audioPlayer.controls = true;
+        audioPlayer.className = 'audio-player';
+        audioPlayer.src = 'data:audio/mp3;base64,' + result.audio;
+        audioPlayersVocabDiv.appendChild(audioPlayer);
       }
     });
   </script>

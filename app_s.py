@@ -28,19 +28,28 @@ def get_access_token():
     response.raise_for_status()
     return response.text
 
-def generate_speech(text, access_token, language_code, voice_name, style='whispering'):
+def generate_speech(text, access_token, language_code, voice_name, style=None):
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/ssml+xml; charset=utf-8',
         'X-Microsoft-OutputFormat': 'audio-16khz-32kbitrate-mono-mp3'
     }
-    body = f"""
-    <speak version='1.0' xml:lang='{language_code}'>
-        <voice xml:lang='{language_code}' xml:gender='Female' name='{voice_name}' style='{style}'>
-            {text}
-        </voice>
-    </speak>
-    """
+    if style:
+        body = f"""
+        <speak version='1.0' xml:lang='{language_code}'>
+            <voice xml:lang='{language_code}' xml:gender='Female' name='{voice_name}' style='{style}'>
+                {text}
+            </voice>
+        </speak>
+        """
+    else:
+        body = f"""
+        <speak version='1.0' xml:lang='{language_code}'>
+            <voice xml:lang='{language_code}' xml:gender='Female' name='{voice_name}'>
+                {text}
+            </voice>
+        </speak>
+        """
     response = requests.post(AZURE_TTS_API_URL, headers=headers, data=body.encode('utf-8'))
 
     if response.status_code != 200:

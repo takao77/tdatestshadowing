@@ -17,7 +17,7 @@ AZURE_TTS_ENDPOINT = os.getenv('AZURE_TTS_ENDPOINT')
 AZURE_TTS_API_URL = os.getenv('AZURE_TTS_API_URL')
 AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
-AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'
+AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
 
 def get_access_token():
     headers = {
@@ -80,33 +80,46 @@ def shadow():
 def generate_sentences():
     vocab = request.form['vocab']
     words = vocab.split(',')
-    sentences = []
-
     headers = {
         'Content-Type': 'application/json',
         'api-key': AZURE_OPENAI_API_KEY,
     }
 
-    for _ in range(5):
-        prompt = f"Create a sentence using the following words: {', '.join(words)}"
-        data = {
-            "messages": [
-                {"role": "system", "content": "You are an assistant that creates sentences using provided words."},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        response = requests.post(
-            f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
-            headers=headers,
-            json=data
-        )
-        if response.status_code == 200:
-            sentence = response.json()["choices"][0]["message"]["content"].strip()
-            sentences.append(sentence)
-        else:
-            return jsonify({"error": response.json()}), response.status_code
+    prompt = f"Create a sentence using the following words: {', '.join(words)}"
+    data = {
+        "messages": [
+            {"role": "system", "content": "You are an assistant that creates sentences using provided words."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+        headers=headers,
+        json=data
+    )
 
-    return jsonify({"sentences": sentences})
+    if response.status_code == 200:
+        sentence = response.json()["choices"][0]["message"]["content"].strip()
+    else:
+        return jsonify({"error": response.json()}), response.status_code
+
+    try:
+        access_token = get_access_token()
+        audio_content = generate_speech(sentence, access_token)
+        combined = AudioSegment.empty()
+        for _ in range(5):
+            audio_segment = AudioSegment.from_file(BytesIO(audio_content), format="mp3")
+            combined += audio_segment
+
+        # Convert the combined audio to base64
+        buffered = BytesIO()
+        combined.export(buffered, format="mp3")
+        audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Error generating speech: {str(e)}'}), 500
+
+    return jsonify({'sentence': sentence, 'audio': audio_base64})
 
 if __name__ == '__main__':
     app.run(debug=True)

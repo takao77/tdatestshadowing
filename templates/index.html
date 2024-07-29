@@ -31,6 +31,33 @@
     label, .btn {
       font-weight: 500;
     }
+    .encourage-btn {
+      background-color: red;
+      color: white;
+      border: none;
+      padding: 10px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 20px;
+      margin: 10px 0;
+      cursor: pointer;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      line-height: 30px;
+    }
+    .encouragement-section {
+      margin-top: 150px;
+      text-align: center;
+    }
+    .encouragement-message {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 10px;
+      border-radius: 10px;
+      display: inline-block;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
@@ -70,6 +97,13 @@
         <div id="sentence-outputs" class="mt-4"></div>
         <div id="audio-players-vocab" class="mt-4"></div>
       </div>
+    </div>
+    <div class="encouragement-section">
+      <button class="encourage-btn" id="encourage-btn">
+        <i class="fas fa-heart"></i>
+      </button>
+      <div id="encourage-output" class="encouragement-message"></div>
+      <div id="audio-players-encourage"></div>
     </div>
   </div>
 
@@ -133,6 +167,36 @@
         audioPlayer.className = 'audio-player';
         audioPlayer.src = 'data:audio/mp3;base64,' + result.audio;
         audioPlayersVocabDiv.appendChild(audioPlayer);
+      }
+    });
+
+    document.getElementById('encourage-btn').addEventListener('click', async function() {
+      const response = await fetch('/encourage', {
+        method: 'POST',
+      });
+      const result = await response.json();
+
+      const encourageOutputDiv = document.getElementById('encourage-output');
+      const audioPlayersEncourageDiv = document.getElementById('audio-players-encourage');
+      encourageOutputDiv.innerHTML = '';
+      audioPlayersEncourageDiv.innerHTML = '';
+
+      if (result.error) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger';
+        errorDiv.textContent = 'Error: ' + (result.error.message || JSON.stringify(result.error));
+        encourageOutputDiv.appendChild(errorDiv);
+      } else {
+        const encourageDiv = document.createElement('div');
+        encourageDiv.className = 'alert alert-info';
+        encourageDiv.textContent = result.message;
+        encourageOutputDiv.appendChild(encourageDiv);
+
+        const audioPlayer = document.createElement('audio');
+        audioPlayer.controls = true;
+        audioPlayer.className = 'audio-player';
+        audioPlayer.src = 'data:audio/mp3;base64,' + result.audio;
+        audioPlayersEncourageDiv.appendChild(audioPlayer);
       }
     });
   </script>

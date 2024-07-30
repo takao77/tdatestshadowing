@@ -130,3 +130,7 @@ dmypy.json
 
 # Created by virtualenv automatically
 venv/
+
+# Allow resources directory and its contents
+!resources/
+!resources/*.csv

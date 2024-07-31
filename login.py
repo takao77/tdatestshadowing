@@ -1,49 +1,55 @@
-# login.py
-
-from flask import Flask, session, redirect, url_for, render_template, request, flash
+from flask import Flask, render_template, request, redirect, session, url_for, jsonify
+from werkzeug.security import check_password_hash
 import csv
-import bcrypt
 import os
 
-# Define the path to the resources folder
-RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
+app = Flask(__name__)
+app.secret_key = os.getenv('APP_SECRET_KEY')
 
-def load_users():
-    """Load users from a CSV file."""
-    users = []
-    with open(os.path.join(RESOURCE_PATH, 'users.csv'), newline='', encoding='utf-8') as csvfile:
+# Path to the CSV file with user credentials
+USERS_CSV_PATH = os.path.join(os.path.dirname(__file__), 'resources', 'users.csv')
+
+# Load user data from CSV
+def load_user_data():
+    users = {}
+    with open(USERS_CSV_PATH, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            users.append(row)
+            user_id = row['id']
+            users[user_id] = {
+                'name': row['name'],
+                'password': row['password']
+            }
     return users
 
-def login_user(app):
-    @app.route('/login', methods=['GET', 'POST'])
-    def login():
-        if request.method == 'POST':
-            email = request.form['email']
-            password = request.form['password'].encode('utf-8')
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user_id = request.form['user_id']
+        password = request.form['password']
 
-            users = load_users()
-            for user in users:
-                if user['email'] == email:
-                    if bcrypt.checkpw(password, user['password'].encode('utf-8')):
-                        session['user'] = user['name']
-                        flash('Login successful!', 'success')
-                        return redirect(url_for('dashboard'))
-                    else:
-                        flash('Invalid credentials', 'danger')
-                        return render_template('login.html', message='Invalid credentials')
-            flash('User not found', 'danger')
-            return render_template('login.html', message='User not found')
+        # Load user data from CSV
+        users = load_user_data()
 
-        return render_template('login.html', message="")
+        # Check if user_id exists and password matches
+        if user_id in users and check_password_hash(users[user_id]['password'], password):
+            session['user_id'] = user_id
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', message='IDまたはパスワードが違います。')
 
-    @app.route('/logout')
-    def logout():
-        session.pop('user', None)
-        flash('You have been logged out', 'info')
+    return render_template('login.html', message='IDとパスワードを入力してください')
+
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    return redirect(url_for('login'))
+
+@app.route('/')
+def index():
+    if 'user_id' not in session:
         return redirect(url_for('login'))
+    return render_template('index.html', user_id=session['user_id'])
 
-def init_app(app):
-    login_user(app)
+if __name__ == '__main__':
+    app.run(debug=True)

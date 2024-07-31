@@ -26,22 +26,30 @@ AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
 
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
+USER_FILE = os.path.join(RESOURCE_PATH, 'users.csv')  # Path to the user data CSV
 
-
-def load_user_data():
+# Function to load users from CSV
+def load_users():
     users = {}
-    try:
-        with open(os.path.join(RESOURCE_PATH, 'users.csv'), newline='', encoding='utf-8') as csvfile:
+    if os.path.exists(USER_FILE):
+        with open(USER_FILE, 'r', newline='', encoding='utf-8') as csvfile:
             reader = csv.reader(csvfile)
             for row in reader:
-                if len(row) == 3:
-                    name, email, password = row
-                    users[email] = {'name': name, 'password': password}
-    except Exception as e:
-        print(f"Error loading user data: {str(e)}")
+                if len(row) > 2:
+                    user_id, name, password = row
+                    users[user_id] = {'name': name, 'password': password}
     return users
 
-users = load_user_data()
+# Load users into a global variable
+USERS = load_users()
+
+
+# Function to check user credentials
+def check_user_credentials(user_id, password):
+    user = USERS.get(user_id)
+    if user and user['password'] == password:
+        return user['name']
+    return None
 
 
 # Load idioms from CSV files
@@ -145,34 +153,35 @@ def generate_encouraging_message(language):
 
     return message
 
+# Sample route for logging in a user
 @app.route('/login', methods=['GET', 'POST'])
-def login():
+def login_user():
     if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
+        user_id = request.form.get('user_id')
+        password = request.form.get('password')
+        if user_id and password:
+            user_name = check_user_credentials(user_id, password)
+            if user_name:
+                session['user_id'] = user_id
+                session['user_name'] = user_name
+                return redirect(url_for('index'))
+        return render_template('login.html', message='IDとパスワードを入れてください')
+    return render_template('login.html')
 
-        # Check if the user exists and the password matches
-        if email in users and users[email]['password'] == password:
-            session['user'] = users[email]['name']  # Store user name in session
-            return redirect(url_for('index'))
-        else:
-            return render_template('login.html', message='emailアドレスとパスワードを入れてください')
 
-    return render_template('login.html', message='')
-
-
+# Route for logging out a user
 @app.route('/logout')
 def logout():
-    session.pop('user', None)  # Remove user from session
-    return redirect(url_for('login'))
+    session.clear()
+    return redirect(url_for('login_user'))
 
 
 @app.route('/')
 def index():
-    if 'user' in session:
-        return render_template('index.html')
-    else:
-        return redirect(url_for('login'))
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('index.html', user_name=session.get('user_name'))
+
 
 @app.route('/shadow', methods=['POST'])
 def shadow():

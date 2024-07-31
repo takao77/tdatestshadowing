@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 import requests
 import base64
 from pydub import AudioSegment
@@ -12,6 +12,8 @@ import csv
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Changed here
+
 
 # Retrieve API key and endpoints from environment variables
 AZURE_API_KEY = os.getenv('AZURE_API_KEY')
@@ -24,6 +26,23 @@ AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
 
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
+
+
+def load_user_data():
+    users = {}
+    try:
+        with open(os.path.join(RESOURCE_PATH, 'users.csv'), newline='', encoding='utf-8') as csvfile:
+            reader = csv.reader(csvfile)
+            for row in reader:
+                if len(row) == 3:
+                    name, email, password = row
+                    users[email] = {'name': name, 'password': password}
+    except Exception as e:
+        print(f"Error loading user data: {str(e)}")
+    return users
+
+users = load_user_data()
+
 
 # Load idioms from CSV files
 def load_idioms(filename):
@@ -126,9 +145,34 @@ def generate_encouraging_message(language):
 
     return message
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+
+        # Check if the user exists and the password matches
+        if email in users and users[email]['password'] == password:
+            session['user'] = users[email]['name']  # Store user name in session
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', message='emailアドレスとパスワードを入れてください')
+
+    return render_template('login.html', message='')
+
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None)  # Remove user from session
+    return redirect(url_for('login'))
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    if 'user' in session:
+        return render_template('index.html')
+    else:
+        return redirect(url_for('login'))
 
 @app.route('/shadow', methods=['POST'])
 def shadow():

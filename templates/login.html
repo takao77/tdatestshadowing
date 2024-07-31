@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TDA Shadowing Login</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: black;
+      color: white;
+      font-family: 'Roboto', sans-serif;
+    }
+    .container {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px;
+      border-radius: 10px;
+      margin-top: 50px;
+      width: 300px;
+      max-width: 100%;
+    }
+    h1, h2 {
+      font-weight: 700;
+    }
+    label, .btn {
+      font-weight: 500;
+    }
+    .btn-block {
+      width: 100%;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .login-container {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container login-container">
+    <h2 class="text-center">TDA Shadowing Login</h2>
+    <form action="/login" method="POST">
+      <div class="form-group">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">
+        <i class="fas fa-sign-in-alt"></i> Login
+      </button>
+    </form>
+    <div id="message" class="mt-4">
+      <!-- Display any login error messages here -->
+      emailアドレスとパスワードを入れてください
+    </div>
+  </div>
+
+  <!-- jQuery and Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

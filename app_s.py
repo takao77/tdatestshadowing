@@ -28,6 +28,27 @@ AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
 USER_FILE = os.path.join(RESOURCE_PATH, 'users.csv')  # Path to the user data CSV
 
+
+# Define the path to the user logs folder
+USER_LOGS_PATH = os.path.join(os.path.dirname(__file__), 'user_logs')
+os.makedirs(USER_LOGS_PATH, exist_ok=True)
+
+
+def log_user_activity(user_id, idiom, example_sentence):
+    # Define the path for the user's CSV log file
+    log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
+
+    # Check if the file exists to determine if headers are needed
+    file_exists = os.path.isfile(log_file_path)
+
+    # Open the CSV file in append mode and write the log entry
+    with open(log_file_path, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        if not file_exists:
+            writer.writerow(['User ID', 'Idiom', 'Example Sentence'])  # Write header if file does not exist
+        writer.writerow([user_id, idiom, example_sentence])
+
+
 # Function to load users from CSV
 def load_users():
     users = {}
@@ -349,20 +370,18 @@ def generate_idiom_meaning(idiom):
 
 @app.route('/get_idiom', methods=['POST'])
 def get_idiom():
+    if 'user_id' not in session:
+        return jsonify({"error": "User not logged in"}), 403
+
+    user_id = session['user_id']
     category = request.form.get('idiom-category')
     if category not in ['advanced', 'genz', 'business']:
         return jsonify({"error": "Invalid category"}), 400
 
     try:
-        # Generate idiom by randomly selecting from CSV files
         idiom = generate_idiom(category)
-        print(f"Selected Idiom: {idiom}")
-
-        # Generate meaning and example sentence as before
         meaning = generate_idiom_meaning(idiom)
-        print(f"Generated Meaning: {meaning}")
         example_sentence = generate_example_sentence(idiom)
-        print(f"Generated Example Sentence: {example_sentence}")
 
         if not example_sentence or len(example_sentence.split()) < 5:
             raise ValueError("Generated example sentence is too short or empty.")
@@ -377,6 +396,9 @@ def get_idiom():
         buffered = BytesIO()
         combined.export(buffered, format="mp3")
         audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        # Log user activity
+        log_user_activity(user_id, idiom, example_sentence)
 
     except Exception as e:
         error_message = f"Error generating speech: {str(e)}"

@@ -77,6 +77,9 @@
       <li class="nav-item">
         <a class="nav-link" id="idioms-tab" data-toggle="tab" href="#idioms" role="tab" aria-controls="idioms" aria-selected="false">Idioms</a>
       </li>
+      <li class="nav-item">
+        <a class="nav-link" id="logs-tab" data-toggle="tab" href="#logs" role="tab" aria-controls="logs" aria-selected="false">Logs</a>
+      </li>
     </ul>
     <div class="tab-content" id="myTabContent">
       <!-- Shadowing Tab -->
@@ -136,6 +139,25 @@
           </div>
         </div>
         <div id="audio-players-idioms" class="mt-4"></div>
+      </div>
+      <!-- Logs Tab -->
+      <div class="tab-pane fade" id="logs" role="tabpanel" aria-labelledby="logs-tab">
+        <div class="mt-4">
+          <h3>User Activity Log</h3>
+          <table class="table table-dark">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Idiom</th>
+                <th>Example Sentence</th>
+                <th>Date</th> <!-- Added Date column header -->
+              </tr>
+            </thead>
+            <tbody id="log-entries">
+              <!-- Log entries will be inserted here -->
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
     <div class="encouragement-section">
@@ -273,6 +295,34 @@
         audioPlayer.src = 'data:audio/mp3;base64,' + result.audio;
         audioPlayersEncourageDiv.appendChild(audioPlayer);
       }
+    });
+
+    // Fetch and display user logs
+    document.getElementById('logs-tab').addEventListener('click', async function() {
+      const response = await fetch('/user_logs');
+      const logs = await response.json();
+      const logEntries = document.getElementById('log-entries');
+      logEntries.innerHTML = '';
+
+      logs.forEach(log => {
+        const row = document.createElement('tr');
+        const idCell = document.createElement('td');
+        const idiomCell = document.createElement('td');
+        const exampleCell = document.createElement('td');
+        const dateCell = document.createElement('td'); // Create a cell for the date
+
+        idCell.textContent = log.user_id;
+        idiomCell.textContent = log.idiom;
+        exampleCell.textContent = log.example_sentence;
+        dateCell.textContent = log.date; // Add the date value to the cell
+
+        row.appendChild(idCell);
+        row.appendChild(idiomCell);
+        row.appendChild(exampleCell);
+        row.appendChild(dateCell); // Append the date cell to the row
+
+        logEntries.appendChild(row);
+      });
     });
   </script>
 </body>

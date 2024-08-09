@@ -7,13 +7,13 @@ from dotenv import load_dotenv
 import os
 import random
 import csv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Changed here
-
+app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 
 # Retrieve API key and endpoints from environment variables
 AZURE_API_KEY = os.getenv('AZURE_API_KEY')
@@ -23,33 +23,29 @@ AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
 AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
 
-
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
 USER_FILE = os.path.join(RESOURCE_PATH, 'users.csv')  # Path to the user data CSV
-
 
 # Define the path to the user logs folder
 USER_LOGS_PATH = os.path.join(os.path.dirname(__file__), 'user_logs')
 os.makedirs(USER_LOGS_PATH, exist_ok=True)
 
-
+# Function to log user activity with a date
 def log_user_activity(user_id, idiom, example_sentence):
-    # Define the path for the user's CSV log file
     log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
-
-    # Check if the file exists to determine if headers are needed
     file_exists = os.path.isfile(log_file_path)
 
-    # Open the CSV file in append mode and write the log entry
+    # Get current date in day/month/year format
+    current_date = datetime.now().strftime('%d/%m/%Y')
+
     with open(log_file_path, mode='a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(['User ID', 'Idiom', 'Example Sentence'])  # Write header if file does not exist
-        writer.writerow([user_id, idiom, example_sentence])
+            writer.writerow(['Date', 'User ID', 'Idiom', 'Example Sentence'])
+        writer.writerow([current_date, user_id, idiom, example_sentence])
 
-
-# Function to load users from CSV
+# Load users from CSV
 def load_users():
     users = {}
     if os.path.exists(USER_FILE):
@@ -61,17 +57,14 @@ def load_users():
                     users[user_id] = {'name': name, 'password': password}
     return users
 
-# Load users into a global variable
 USERS = load_users()
 
-
-# Function to check user credentials
+# Check user credentials
 def check_user_credentials(user_id, password):
     user = USERS.get(user_id)
     if user and user['password'] == password:
         return user['name']
     return None
-
 
 # Load idioms from CSV files
 def load_idioms(filename):
@@ -81,12 +74,11 @@ def load_idioms(filename):
         idioms = [row[0] for row in reader if row]
     return idioms
 
-# Load idioms from each category
 advanced_idioms = load_idioms('advanced_idioms.csv')
 genz_idioms = load_idioms('genz_idioms.csv')
 business_idioms = load_idioms('business_idioms.csv')
 
-
+# Function to get access token for Azure TTS
 def get_access_token():
     headers = {
         'Ocp-Apim-Subscription-Key': AZURE_API_KEY,
@@ -95,7 +87,7 @@ def get_access_token():
     response.raise_for_status()
     return response.text
 
-
+# Function to generate speech using Azure TTS
 def generate_speech(text, access_token, language_code, voice_name, style=None):
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -125,15 +117,13 @@ def generate_speech(text, access_token, language_code, voice_name, style=None):
         response.raise_for_status()
     else:
         try:
-            # Log the generated text and its length
             print(f"Generated Text: '{text}'")
             print(f"Generated Text Length: {len(text)}")
 
-            # Attempt to decode audio and check if it is valid
             audio_data = response.content
             print(f"Received Audio Data Length: {len(audio_data)} bytes")
 
-            if not audio_data or len(audio_data) < 100:  # Arbitrary small length check
+            if not audio_data or len(audio_data) < 100:
                 raise ValueError("Received audio data is invalid or too short.")
 
             return audio_data
@@ -141,11 +131,11 @@ def generate_speech(text, access_token, language_code, voice_name, style=None):
             print(f"Error decoding audio data: {str(e)}")
             raise
 
-
+# Function to generate encouraging messages
 def generate_encouraging_message(language):
     if language == 'en':
         prompt = "Give me something encouraging to me, like the lover is praising me. I am tired of keeping working hard. Shorter, and like intimate conversation, talking style. Within 100 characters."
-    else:  # zh
+    else:
         prompt = "给我一些鼓励的话，就像恋人夸奖我一样。我厌倦了不断努力工作。短一点，就像亲密的对话一样。100个字符以内。"
 
     headers = {
@@ -157,7 +147,7 @@ def generate_encouraging_message(language):
             {"role": "system", "content": "You are an assistant that provides encouraging messages."},
             {"role": "user", "content": prompt}
         ],
-        "max_tokens": 100  # Adjust max tokens to ensure shorter response
+        "max_tokens": 100
     }
     response = requests.post(
         f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
@@ -167,14 +157,80 @@ def generate_encouraging_message(language):
 
     if response.status_code == 200:
         message = response.json()["choices"][0]["message"]["content"].strip()
-        if len(message) > 100:  # Additional check to truncate message if necessary
+        if len(message) > 100:
             message = message[:100]
     else:
         raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
 
     return message
 
-# Sample route for logging in a user
+# Function to generate idiom
+def generate_idiom(category):
+    if category == 'advanced':
+        idiom = random.choice(advanced_idioms)
+    elif category == 'genz':
+        idiom = random.choice(genz_idioms)
+    elif category == 'business':
+        idiom = random.choice(business_idioms)
+    else:
+        raise ValueError("Invalid category")
+
+    return idiom
+
+# Function to generate example sentence
+def generate_example_sentence(idiom):
+    prompt = f"Provide a sentence using the idiom '{idiom}' in a meaningful context."
+
+    headers = {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY,
+    }
+    data = {
+        "messages": [
+            {"role": "system", "content": "You are an assistant that creates example sentences using provided idioms."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+        headers=headers,
+        json=data
+    )
+
+    if response.status_code == 200:
+        response_data = response.json()
+        example_sentence = response_data["choices"][0]["message"]["content"].strip()
+        return example_sentence
+    else:
+        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
+
+# Function to generate idiom meaning
+def generate_idiom_meaning(idiom):
+    prompt = f"Provide the meaning of the idiom '{idiom}' in simple English and Japanese."
+
+    headers = {
+        'Content-Type': 'application/json',
+        'api-key': AZURE_OPENAI_API_KEY,
+    }
+    data = {
+        "messages": [
+            {"role": "system", "content": "You are an assistant that explains the meaning of idioms in both English and Japanese."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+        headers=headers,
+        json=data
+    )
+
+    if response.status_code == 200:
+        response_data = response.json()
+        meaning = response_data["choices"][0]["message"]["content"].strip()
+        return meaning
+    else:
+        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
+
 @app.route('/login', methods=['GET', 'POST'])
 def login_user():
     if request.method == 'POST':
@@ -189,20 +245,16 @@ def login_user():
         return render_template('login.html', message='IDとパスワードを入れてください')
     return render_template('login.html')
 
-
-# Route for logging out a user
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('login_user'))
-
 
 @app.route('/')
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))
     return render_template('index.html', user_name=session.get('user_name'))
-
 
 @app.route('/shadow', methods=['POST'])
 def shadow():
@@ -219,7 +271,6 @@ def shadow():
             audio_segment = AudioSegment.from_file(BytesIO(audio_content), format="mp3")
             combined += audio_segment
 
-        # Convert the combined audio to base64
         buffered = BytesIO()
         combined.export(buffered, format="mp3")
         audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
@@ -264,7 +315,6 @@ def generate_sentences():
             audio_segment = AudioSegment.from_file(BytesIO(audio_content), format="mp3")
             combined += audio_segment
 
-        # Convert the combined audio to base64
         buffered = BytesIO()
         combined.export(buffered, format="mp3")
         audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
@@ -284,7 +334,7 @@ def encourage():
         if language == 'en':
             language_code = 'en-US'
             voice_name = 'en-US-AriaNeural'
-        else:  # zh
+        else:
             language_code = 'zh-CN'
             voice_name = 'zh-CN-XiaoxiaoNeural'
 
@@ -295,78 +345,6 @@ def encourage():
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'message': message, 'audio': audio_base64})
-
-
-def generate_idiom(category):
-    if category == 'advanced':
-        idiom = random.choice(advanced_idioms)
-    elif category == 'genz':
-        idiom = random.choice(genz_idioms)
-    elif category == 'business':
-        idiom = random.choice(business_idioms)
-    else:
-        raise ValueError("Invalid category")
-
-    return idiom
-
-
-def generate_example_sentence(idiom):
-    prompt = f"Provide a sentence using the idiom '{idiom}' in a meaningful context."
-
-    headers = {
-        'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY,
-    }
-    data = {
-        "messages": [
-            {"role": "system", "content": "You are an assistant that creates example sentences using provided idioms."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(
-        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
-        headers=headers,
-        json=data
-    )
-
-    if response.status_code == 200:
-        response_data = response.json()
-        print(f"Full Gen AI Response for Example Sentence: {response_data}")
-        example_sentence = response_data["choices"][0]["message"]["content"].strip()
-        return example_sentence
-    else:
-        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
-
-
-def generate_idiom_meaning(idiom):
-    # Prompt for generating the meaning in both English and Japanese
-    prompt = f"Provide the meaning of the idiom '{idiom}' in simple English and Japanese."
-
-    headers = {
-        'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY,
-    }
-    data = {
-        "messages": [
-            {"role": "system", "content": "You are an assistant that explains the meaning of idioms in both English and Japanese."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(
-        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
-        headers=headers,
-        json=data
-    )
-
-    if response.status_code == 200:
-        response_data = response.json()
-        print(f"Full Gen AI Response for Meaning: {response_data}")
-        meaning = response_data["choices"][0]["message"]["content"].strip()
-
-        return meaning
-    else:
-        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
-
 
 @app.route('/get_idiom', methods=['POST'])
 def get_idiom():
@@ -397,7 +375,6 @@ def get_idiom():
         combined.export(buffered, format="mp3")
         audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-        # Log user activity
         log_user_activity(user_id, idiom, example_sentence)
 
     except Exception as e:
@@ -407,6 +384,29 @@ def get_idiom():
 
     return jsonify({'idiom': idiom, 'meaning': meaning, 'example': example_sentence, 'audio': audio_base64})
 
+@app.route('/user_logs', methods=['GET'])
+def user_logs():
+    if 'user_id' not in session:
+        return jsonify({"error": "User not logged in"}), 403
+
+    user_id = session['user_id']
+    log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
+
+    if not os.path.exists(log_file_path):
+        return jsonify([])
+
+    logs = []
+    with open(log_file_path, 'r', newline='', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            logs.append({
+                'date': row['Date'],
+                'user_id': row['User ID'],
+                'idiom': row['Idiom'],
+                'example_sentence': row['Example Sentence']
+            })
+
+    return jsonify(logs)
 
 if __name__ == '__main__':
     app.run(debug=True)

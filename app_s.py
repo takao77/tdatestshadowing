@@ -31,7 +31,7 @@ USER_FILE = os.path.join(RESOURCE_PATH, 'users.csv')  # Path to the user data CS
 USER_LOGS_PATH = os.path.join(os.path.dirname(__file__), 'user_logs')
 os.makedirs(USER_LOGS_PATH, exist_ok=True)
 
-# Function to log user activity with a date
+
 def log_user_activity(user_id, idiom, example_sentence):
     log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
     file_exists = os.path.isfile(log_file_path)
@@ -45,7 +45,6 @@ def log_user_activity(user_id, idiom, example_sentence):
             writer.writerow(['Date', 'User ID', 'Idiom', 'Example Sentence'])
         writer.writerow([current_date, user_id, idiom, example_sentence])
 
-# Load users from CSV
 def load_users():
     users = {}
     if os.path.exists(USER_FILE):
@@ -59,7 +58,6 @@ def load_users():
 
 USERS = load_users()
 
-# Check user credentials
 def check_user_credentials(user_id, password):
     user = USERS.get(user_id)
     if user and user['password'] == password:
@@ -78,7 +76,6 @@ advanced_idioms = load_idioms('advanced_idioms.csv')
 genz_idioms = load_idioms('genz_idioms.csv')
 business_idioms = load_idioms('business_idioms.csv')
 
-# Function to get access token for Azure TTS
 def get_access_token():
     headers = {
         'Ocp-Apim-Subscription-Key': AZURE_API_KEY,
@@ -87,7 +84,6 @@ def get_access_token():
     response.raise_for_status()
     return response.text
 
-# Function to generate speech using Azure TTS
 def generate_speech(text, access_token, language_code, voice_name, style=None):
     headers = {
         'Authorization': f'Bearer {access_token}',
@@ -131,7 +127,6 @@ def generate_speech(text, access_token, language_code, voice_name, style=None):
             print(f"Error decoding audio data: {str(e)}")
             raise
 
-# Function to generate encouraging messages
 def generate_encouraging_message(language):
     if language == 'en':
         prompt = "Give me something encouraging to me, like the lover is praising me. I am tired of keeping working hard. Shorter, and like intimate conversation, talking style. Within 100 characters."
@@ -164,7 +159,6 @@ def generate_encouraging_message(language):
 
     return message
 
-# Function to generate idiom
 def generate_idiom(category):
     if category == 'advanced':
         idiom = random.choice(advanced_idioms)
@@ -177,7 +171,6 @@ def generate_idiom(category):
 
     return idiom
 
-# Function to generate example sentence
 def generate_example_sentence(idiom):
     prompt = f"Provide a sentence using the idiom '{idiom}' in a meaningful context."
 
@@ -204,7 +197,6 @@ def generate_example_sentence(idiom):
     else:
         raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
 
-# Function to generate idiom meaning
 def generate_idiom_meaning(idiom):
     prompt = f"Provide the meaning of the idiom '{idiom}' in simple English and Japanese."
 
@@ -384,7 +376,7 @@ def get_idiom():
 
     return jsonify({'idiom': idiom, 'meaning': meaning, 'example': example_sentence, 'audio': audio_base64})
 
-@app.route('/user_logs', methods=['GET'])
+@app.route('/user_logs', methods=['GET', 'DELETE'])
 def user_logs():
     if 'user_id' not in session:
         return jsonify({"error": "User not logged in"}), 403
@@ -395,6 +387,28 @@ def user_logs():
     if not os.path.exists(log_file_path):
         return jsonify([])
 
+    if request.method == 'DELETE':
+        data = request.get_json()
+        idiom = data.get('idiom')
+        example_sentence = data.get('example_sentence')
+        updated_logs = []
+
+        # Read all logs except the one to delete
+        with open(log_file_path, 'r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                if row['Idiom'] != idiom or row['Example Sentence'] != example_sentence:
+                    updated_logs.append(row)
+
+        # Write the updated logs back to the file
+        with open(log_file_path, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.DictWriter(file, fieldnames=['Date', 'User ID', 'Idiom', 'Example Sentence'])
+            writer.writeheader()
+            writer.writerows(updated_logs)
+
+        return jsonify({"success": True})
+
+    # If method is GET, return logs
     logs = []
     with open(log_file_path, 'r', newline='', encoding='utf-8') as file:
         reader = csv.DictReader(file)

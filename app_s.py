@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
-# import azure.cognitiveservices.speech as speechsdk
+import azure.cognitiveservices.speech as speechsdk
 import requests
 import base64
 from pydub import AudioSegment
@@ -9,8 +9,10 @@ import os
 import random
 import csv
 from datetime import datetime
-# import time
-# import json
+import time
+import json
+import difflib
+import string
 
 
 # Load environment variables from .env file
@@ -26,8 +28,8 @@ AZURE_TTS_API_URL = os.getenv('AZURE_TTS_API_URL')
 AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
 AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
-# AZURE_SPEECH_API_KEY = os.getenv('AZURE_SPEECH_API_KEY')  # For Speech API
-# AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')  # Region for Speech API
+AZURE_SPEECH_API_KEY = os.getenv('AZURE_SPEECH_API_KEY')  # For Speech API
+AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')  # Region for Speech API
 
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
@@ -40,6 +42,13 @@ os.makedirs(USER_LOGS_PATH, exist_ok=True)
 # Get the absolute path to the resources folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESOURCES_FOLDER = os.path.join(BASE_DIR, 'resources')
+
+# Path to the 'user_audio' folder
+USER_AUDIO_PATH = os.path.join(os.path.dirname(__file__), 'user_audio')
+
+# Ensure the 'user_audio' folder exists
+os.makedirs(USER_AUDIO_PATH, exist_ok=True)
+
 
 def log_user_activity(user_id, idiom, example_sentence):
     log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
@@ -505,6 +514,110 @@ def shadowing():
 
     # Render the shadowing.html page if the user is authenticated
     return render_template('shadowing.html')
+
+
+@app.route('/save_recording', methods=['POST'])
+def save_recording():
+    """Saves the user's recorded audio as a .wav file."""
+
+    # Check if the user is logged in
+    if 'user_id' not in session:
+        return jsonify({"error": "User not logged in"}), 403
+
+    # Get the user's ID and name from the session
+    user_id = session['user_id']
+    user_name = session['user_name']
+
+    # Create a folder for the user if it doesn't exist
+    user_folder = os.path.join(USER_AUDIO_PATH, user_name)
+    os.makedirs(user_folder, exist_ok=True)
+
+    # Get the uploaded audio data from the request
+    audio_data = request.files.get('audio_data')
+
+    if not audio_data:
+        return jsonify({"error": "No audio data provided"}), 400
+
+    # Generate a unique filename using the current timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    audio_filename = f'{timestamp}.wav'
+
+    # Path to save the audio file
+    audio_path = os.path.join(user_folder, audio_filename)
+
+    # Save the audio file to the user's folder
+    audio_data.save(audio_path)
+
+    return jsonify({"success": True, "message": "Audio saved successfully", "audio_path": audio_path})
+
+
+def ensure_correct_wav_format(input_file):
+    # Convert the audio file to WAV format with the correct specifications
+    audio = AudioSegment.from_file(input_file)
+    wav_output_path = input_file.replace(".webm", ".wav")
+    audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+    audio.export(wav_output_path, format="wav")
+    return wav_output_path
+
+
+# Function to assess pronunciation
+@app.route('/assess_pronunciation', methods=['POST'])
+def assess_pronunciation():
+    """Performs pronunciation assessment on a saved audio file."""
+
+    if 'user_id' not in session:
+        return jsonify({"error": "User not logged in"}), 403
+
+    audio_path = request.form.get('audio_path')
+    sentence = request.form.get('sentence')
+
+    if not audio_path or not sentence:
+        return jsonify({"error": "Missing audio path or sentence"}), 400
+
+    if not os.path.exists(audio_path):
+        return jsonify({"error": f"Audio file not found: {audio_path}"}), 400
+
+    try:
+        # Convert to proper WAV format if necessary
+        audio_path = ensure_correct_wav_format(audio_path)
+
+        # Initialize the SpeechConfig and AudioConfig with the WAV file
+        speech_config = speechsdk.SpeechConfig(subscription=AZURE_SPEECH_API_KEY, region=AZURE_SPEECH_REGION)
+        audio_config = speechsdk.audio.AudioConfig(filename=audio_path)
+
+        # Set up pronunciation assessment config
+        pronunciation_config = speechsdk.PronunciationAssessmentConfig(
+            reference_text=sentence,
+            grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
+            granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme
+        )
+
+        # Create a speech recognizer using the WAV file as audio input
+        speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+        pronunciation_config.apply_to(speech_recognizer)
+
+        # Recognize once (simpler flow)
+        result = speech_recognizer.recognize_once()
+
+        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+            pronunciation_result = speechsdk.PronunciationAssessmentResult(result)
+            return jsonify({
+                "success": True,
+                "result": {
+                    "pronunciationScore": pronunciation_result.pronunciation_score,
+                    "accuracyScore": pronunciation_result.accuracy_score,
+                    "completenessScore": pronunciation_result.completeness_score,
+                    "fluencyScore": pronunciation_result.fluency_score
+                }
+            })
+        elif result.reason == speechsdk.ResultReason.NoMatch:
+            return jsonify({"success": False, "error": "No speech could be recognized."})
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            return jsonify({"success": False, "error": f"Speech Recognition canceled: {cancellation_details.reason}"})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 if __name__ == '__main__':

@@ -3,83 +3,161 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shadowing Practice with Tabs and Logout</title>
-  <!-- Bootstrap CSS -->
-  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <title>Shadowing Practice with Gen Z Style</title>
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
     body {
-      background-color: black;
+      background-color: #1e1e1e;
       color: white;
-      font-family: 'Roboto', sans-serif;
+      font-family: 'Raleway', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
     }
     .container {
-      background: rgba(0, 0, 0, 0.7);
-      padding: 20px;
-      border-radius: 10px;
-      margin-top: 50px;
-    }
-    h1, p {
+      background: rgba(40, 40, 40, 0.8);
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      max-width: 400px;
       text-align: center;
     }
-    .btn {
+    h1 {
+      font-size: 1.2rem;
+      margin-bottom: 20px;
+    }
+    .tab {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 30px;
+    }
+    .tab button {
+      background: none;
+      border: none;
+      font-size: 1rem;
+      color: #888;
+      cursor: pointer;
+      padding: 10px;
+      transition: color 0.3s, border-bottom 0.3s;
+    }
+    .tab button.active {
+      color: white;
+      border-bottom: 2px solid #1abc9c;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
       display: block;
-      margin: 20px auto;
+    }
+    .icon-btn {
+      font-size: 50px;
+      color: #3498db;
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, color 0.3s;
+    }
+    .icon-btn:hover {
+      transform: scale(1.1);
+      color: #5dade2;
+    }
+    .icon-btn.red {
+      color: #e74c3c;
+    }
+    .icon-btn.red:hover {
+      color: #f1948a;
+    }
+    .icon-btn.green {
+      color: #2ecc71;
+    }
+    .icon-btn.green:hover {
+      color: #58d68d;
+    }
+    .icon-container {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      margin-top: 40px;
     }
     audio {
       display: block;
       margin: 20px auto;
-    }
-    #logout-btn {
-      position: absolute;
-      top: 20px;
-      right: 20px;
     }
     #assessment-result {
       margin-top: 20px;
       text-align: center;
       font-size: 18px;
     }
+    /* Gray Logout Button */
+    .logout-btn {
+      background-color: #7f8c8d;
+      padding: 10px 20px;
+      border-radius: 8px;
+      color: white;
+      text-decoration: none;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      transition: background-color 0.3s;
+    }
+    .logout-btn:hover {
+      background-color: #95a5a6;
+    }
   </style>
 </head>
 <body>
-  <!-- Logout Button -->
-  <a href="/logout" id="logout-btn" class="btn btn-danger">Logout</a>
+
+  <!-- Gray Logout Button -->
+  <a href="/logout" class="logout-btn">Logout</a>
 
   <div class="container">
-    <h1>Shadowing Practice</h1>
+    <h1 id="dynamic-sentence">Loading sentence...</h1> <!-- Dynamic sentence will be populated here -->
 
     <!-- Tabs for Practice Mode and Record Mode -->
-    <ul class="nav nav-tabs" id="modeTabs" role="tablist">
-      <li class="nav-item">
-        <a class="nav-link active" id="practice-tab" data-toggle="tab" href="#practice" role="tab" aria-controls="practice" aria-selected="true">Practice Mode</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link" id="record-tab" data-toggle="tab" href="#record" role="tab" aria-controls="record" aria-selected="false">Record Mode</a>
-      </li>
-    </ul>
+    <div class="tab">
+      <button class="active" onclick="showTab('practice')">練習モード</button>
+      <button onclick="showTab('record')">録音モード</button>
+    </div>
 
     <!-- Tab Content -->
-    <div class="tab-content" id="modeTabsContent">
-      <!-- Practice Mode Content -->
-      <div class="tab-pane fade show active" id="practice" role="tabpanel" aria-labelledby="practice-tab">
-        <p id="practice-sentence"></p>
-        <button id="practice-btn" class="btn btn-primary">Play Audio</button>
-        <audio id="practice-audio" controls></audio>
+    <div id="practice" class="tab-content active">
+      <button id="practice-btn" class="icon-btn">
+        <i class="fas fa-play"></i>
+      </button>
+      <audio id="practice-audio" controls></audio>
+    </div>
+
+    <div id="record" class="tab-content">
+      <div class="icon-container">
+        <button id="record-play-btn" class="icon-btn">
+          <i class="fas fa-microphone"></i>
+        </button>
+        <button id="stop-record-btn" class="icon-btn red" disabled>
+          <i class="fas fa-stop"></i>
+        </button>
       </div>
 
-      <!-- Record Mode Content -->
-      <div class="tab-pane fade" id="record" role="tabpanel" aria-labelledby="record-tab">
-        <p id="record-sentence"></p>
-        <button id="record-play-btn" class="btn btn-primary">Play Audio and Record User's Voice</button>
-        <button id="stop-record-btn" class="btn btn-danger" disabled>Stop Recording</button>
-        <audio id="record-audio" controls></audio>
-        <h2>Recorded Audio</h2>
-        <audio id="user-recorded-audio" controls></audio>
+      <!-- Azure Speech Audio Player -->
+      <audio id="record-audio" controls></audio>
 
-        <!-- Assess Button -->
-        <button id="assess-btn" class="btn btn-success">Assess Pronunciation</button>
-        <div id="assessment-result"></div>
-      </div>
+      <!-- Friendly "Check Your Voice" Section with a Small Icon -->
+      <h2 style="display: flex; justify-content: center; align-items: center; font-size: 20px; margin-top: 20px;">
+        <i class="fas fa-headphones-alt" style="margin-right: 10px;"></i> Check Your Voice
+      </h2>
+      <audio id="user-recorded-audio" controls></audio>
+
+      <!-- Assess Button with Text "AI添削" -->
+      <button id="assess-btn" class="icon-btn green">
+        <i class="fas fa-robot"></i><span style="font-size: 18px; margin-left: 10px;">AI添削</span>
+      </button>
+      <div id="assessment-result"></div>
     </div>
   </div>
 
@@ -93,14 +171,14 @@
     let savedAudioPath = null;  // Store the path of the saved audio
 
     $(document).ready(function() {
-      // Fetch the sentence for Practice Mode and Record Mode on page load
+      // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
       fetch('/get_shadow_sentence')
         .then(response => response.json())
         .then(data => {
           if (data.error) {
-            $('#practice-sentence').text('Error: ' + data.error);
-            $('#record-sentence').text('Error: ' + data.error);
+            $('#dynamic-sentence').text('Error: ' + data.error);
           } else {
+            $('#dynamic-sentence').text(data.sentence);
             $('#practice-sentence').text(data.sentence);
             $('#record-sentence').text(data.sentence);
           }
@@ -109,7 +187,7 @@
 
       // Practice Mode: Play Azure Speech Audio 5 times
       $('#practice-btn').on('click', function() {
-        const sentence = $('#practice-sentence').text();
+        const sentence = $('#dynamic-sentence').text();  // Use the dynamic sentence
         const formData = new FormData();
         formData.append('sentence', sentence);
         formData.append('mode', 'practice');  // Indicate Practice Mode
@@ -134,7 +212,7 @@
       // Record Mode: Play Azure Speech Audio once and Record User's Voice
       $('#record-play-btn').on('click', async function() {
         recordedChunks = [];
-        const sentence = $('#record-sentence').text();
+        const sentence = $('#dynamic-sentence').text();  // Use the dynamic sentence
         const formData = new FormData();
         formData.append('sentence', sentence);
         formData.append('mode', 'record');  // Indicate Record Mode
@@ -149,14 +227,14 @@
           if (data.error) {
             alert('Error: ' + data.error);
           } else {
-            const audioPlayer = $('#record-audio');
-            audioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
+            const azureAudioPlayer = $('#record-audio');  // Azure Speech Audio Player
+            azureAudioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
 
             // Play the Azure speech audio once
-            audioPlayer[0].play();
+            azureAudioPlayer[0].play();
 
             // Wait for the audio to start playing, then start recording
-            audioPlayer.on('play', function() {
+            azureAudioPlayer.on('play', function() {
               startRecording(); // Start recording when the audio starts
               $('#stop-record-btn').prop('disabled', false); // Enable the stop button
             });
@@ -186,9 +264,9 @@
               alert('Audio saved successfully!');
               savedAudioPath = data.audio_path;  // Store the path of the saved audio
               const recordedAudioURL = URL.createObjectURL(recordedBlob);
-              const recordedAudio = $('#user-recorded-audio');
-              recordedAudio.attr('src', recordedAudioURL);
-              recordedAudio[0].play();  // Play the user's recorded audio
+              const userAudioPlayer = $('#user-recorded-audio');  // User Recorded Audio Player
+              userAudioPlayer.attr('src', recordedAudioURL);
+              userAudioPlayer[0].play();  // Play the user's recorded audio
             } else {
               alert('Error: ' + data.error);
             }
@@ -211,14 +289,14 @@
         mediaRecorder.start();
       }
 
-      // Assess Pronunciation when the "Assess" button is clicked
+      // Assess Pronunciation when the "AI添削" button is clicked
       $('#assess-btn').on('click', function() {
         if (!savedAudioPath) {
           alert('Please record and save your audio first.');
           return;
         }
 
-        const sentence = $('#record-sentence').text();
+        const sentence = $('#dynamic-sentence').text();  // Use the dynamic sentence
         const formData = new FormData();
         formData.append('audio_path', savedAudioPath);  // Send the path of the saved audio
         formData.append('sentence', sentence);  // Send the sentence for pronunciation assessment
@@ -245,6 +323,23 @@
         .catch(error => console.error('Error assessing pronunciation:', error));
       });
     });
+
+    function showTab(tabName) {
+      // Hide all tabs
+      document.querySelectorAll('.tab-content').forEach(function(tab) {
+        tab.classList.remove('active');
+      });
+
+      // Show the selected tab
+      document.getElementById(tabName).classList.add('active');
+
+      // Update the tab buttons
+      document.querySelectorAll('.tab button').forEach(function(button) {
+        button.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
+    }
   </script>
+
 </body>
 </html>

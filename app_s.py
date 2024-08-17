@@ -458,22 +458,36 @@ def get_shadow_sentence():
     shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
 
     sentences = []
-    try:
-        with open(shadow_csv_path, mode='r', encoding='utf-8') as file:
-            csv_reader = csv.DictReader(file)
-            for row in csv_reader:
-                sentences.append(row['sentence'])  # Assuming 'sentence' is the column name
+    encodings_to_try = ['utf-8-sig', 'utf-8', 'shift_jis', 'iso-8859-1']  # Encodings to try
 
-        # Randomly select a sentence
-        if sentences:
-            selected_sentence = random.choice(sentences)
-            return jsonify({'sentence': selected_sentence})
-        else:
-            return jsonify({'error': 'No sentences found'}), 500
-    except FileNotFoundError:
-        return jsonify({'error': 'shadow.csv not found'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    for encoding in encodings_to_try:
+        try:
+            # Attempt to read the CSV with different encodings
+            with open(shadow_csv_path, mode='r', encoding=encoding) as file:
+                csv_reader = csv.DictReader(file)
+                for row in csv_reader:
+                    sentences.append(row['sentence'])  # Assuming 'sentence' is the column name
+
+            # If we successfully read the file, break out of the loop
+            break
+
+        except UnicodeDecodeError as e:
+            # Log the error and try the next encoding
+            print(f"Failed to read file with encoding {encoding}: {str(e)}")
+            continue  # Try the next encoding
+
+        except FileNotFoundError:
+            return jsonify({'error': 'shadow.csv not found'}), 500
+
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # Check if we successfully loaded any sentences
+    if sentences:
+        selected_sentence = random.choice(sentences)
+        return jsonify({'sentence': selected_sentence})
+    else:
+        return jsonify({'error': 'No sentences found or unable to read file'}), 500
 
 
 @app.route('/generate_shadow_audio', methods=['POST'])

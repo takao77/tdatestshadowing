@@ -34,6 +34,11 @@
       top: 20px;
       right: 20px;
     }
+    #assessment-result {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 18px;
+    }
   </style>
 </head>
 <body>
@@ -70,6 +75,10 @@
         <audio id="record-audio" controls></audio>
         <h2>Recorded Audio</h2>
         <audio id="user-recorded-audio" controls></audio>
+
+        <!-- Assess Button -->
+        <button id="assess-btn" class="btn btn-success">Assess Pronunciation</button>
+        <div id="assessment-result"></div>
       </div>
     </div>
   </div>
@@ -81,16 +90,12 @@
   <script>
     let mediaRecorder;
     let recordedChunks = [];
+    let savedAudioPath = null;  // Store the path of the saved audio
 
     $(document).ready(function() {
       // Fetch the sentence for Practice Mode and Record Mode on page load
       fetch('/get_shadow_sentence')
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok');
-          }
-          return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
           if (data.error) {
             $('#practice-sentence').text('Error: ' + data.error);
@@ -100,9 +105,7 @@
             $('#record-sentence').text(data.sentence);
           }
         })
-        .catch(error => {
-          console.error('Error fetching shadow sentence:', error);
-        });
+        .catch(error => console.error('Error fetching shadow sentence:', error));
 
       // Practice Mode: Play Azure Speech Audio 5 times
       $('#practice-btn').on('click', function() {
@@ -115,12 +118,7 @@
           method: 'POST',
           body: formData
         })
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok');
-          }
-          return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
           if (data.error) {
             alert('Error: ' + data.error);
@@ -130,9 +128,7 @@
             audioPlayer[0].play();  // Play the Azure speech audio 5 times
           }
         })
-        .catch(error => {
-          console.error('Error fetching shadow audio:', error);
-        });
+        .catch(error => console.error('Error fetching shadow audio:', error));
       });
 
       // Record Mode: Play Azure Speech Audio once and Record User's Voice
@@ -148,12 +144,7 @@
           method: 'POST',
           body: formData
         })
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok');
-          }
-          return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
           if (data.error) {
             alert('Error: ' + data.error);
@@ -171,26 +162,42 @@
             });
           }
         })
-        .catch(error => {
-          console.error('Error fetching shadow audio:', error);
-        });
+        .catch(error => console.error('Error fetching shadow audio:', error));
       });
 
-      // Stop recording when the user clicks stop
+      // Stop recording when the user clicks stop and send the audio to the backend
       $('#stop-record-btn').on('click', function() {
         mediaRecorder.stop();  // Stop the recording
         $('#stop-record-btn').prop('disabled', true);  // Disable stop button
 
         mediaRecorder.onstop = function() {
-          const recordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-          const recordedAudioURL = URL.createObjectURL(recordedBlob);
-          const recordedAudio = $('#user-recorded-audio');
-          recordedAudio.attr('src', recordedAudioURL);
-          recordedAudio[0].play();  // Play the user's recorded audio
+          const recordedBlob = new Blob(recordedChunks, { type: 'audio/wav' });  // Save as .wav
+          const formData = new FormData();
+          formData.append('audio_data', recordedBlob, 'user_recording.wav');  // Send as .wav
+
+          // Send the recorded audio to the server for saving
+          fetch('/save_recording', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              alert('Audio saved successfully!');
+              savedAudioPath = data.audio_path;  // Store the path of the saved audio
+              const recordedAudioURL = URL.createObjectURL(recordedBlob);
+              const recordedAudio = $('#user-recorded-audio');
+              recordedAudio.attr('src', recordedAudioURL);
+              recordedAudio[0].play();  // Play the user's recorded audio
+            } else {
+              alert('Error: ' + data.error);
+            }
+          })
+          .catch(error => console.error('Error saving audio:', error));
         };
       });
 
-      // Function to start recording user's voice only
+      // Function to start recording user's voice only in WAV format
       async function startRecording() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });  // Record audio only from microphone
         mediaRecorder = new MediaRecorder(stream);
@@ -203,6 +210,40 @@
 
         mediaRecorder.start();
       }
+
+      // Assess Pronunciation when the "Assess" button is clicked
+      $('#assess-btn').on('click', function() {
+        if (!savedAudioPath) {
+          alert('Please record and save your audio first.');
+          return;
+        }
+
+        const sentence = $('#record-sentence').text();
+        const formData = new FormData();
+        formData.append('audio_path', savedAudioPath);  // Send the path of the saved audio
+        formData.append('sentence', sentence);  // Send the sentence for pronunciation assessment
+
+        // Send the request to the server for pronunciation assessment
+        fetch('/assess_pronunciation', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            const result = data.result;
+            $('#assessment-result').html(`
+              <p><strong>Pronunciation Score:</strong> ${result.pronunciationScore}</p>
+              <p><strong>Accuracy:</strong> ${result.accuracyScore}</p>
+              <p><strong>Fluency:</strong> ${result.fluencyScore}</p>
+              <p><strong>Completeness:</strong> ${result.completenessScore}</p>
+            `);
+          } else {
+            $('#assessment-result').text('Error: ' + data.error);
+          }
+        })
+        .catch(error => console.error('Error assessing pronunciation:', error));
+      });
     });
   </script>
 </body>

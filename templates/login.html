@@ -56,8 +56,12 @@
       </button>
     </form>
     <div id="message" class="mt-4">
-      <!-- Display any login error messages here -->
-      IDとパスワードを入力してください
+      <!-- Dynamically display login error message -->
+      {% if message %}
+        <div class="alert alert-danger">{{ message }}</div>
+      {% else %}
+        IDとパスワードを入力してください
+      {% endif %}
     </div>
   </div>
 

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadowing Practice with Tabs and Logout</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: black;
+      color: white;
+      font-family: 'Roboto', sans-serif;
+    }
+    .container {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px;
+      border-radius: 10px;
+      margin-top: 50px;
+    }
+    h1, p {
+      text-align: center;
+    }
+    .btn {
+      display: block;
+      margin: 20px auto;
+    }
+    audio {
+      display: block;
+      margin: 20px auto;
+    }
+    #logout-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Logout Button -->
+  <a href="/logout" id="logout-btn" class="btn btn-danger">Logout</a>
+
+  <div class="container">
+    <h1>Shadowing Practice</h1>
+
+    <!-- Tabs for Practice Mode and Record Mode -->
+    <ul class="nav nav-tabs" id="modeTabs" role="tablist">
+      <li class="nav-item">
+        <a class="nav-link active" id="practice-tab" data-toggle="tab" href="#practice" role="tab" aria-controls="practice" aria-selected="true">Practice Mode</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" id="record-tab" data-toggle="tab" href="#record" role="tab" aria-controls="record" aria-selected="false">Record Mode</a>
+      </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="modeTabsContent">
+      <!-- Practice Mode Content -->
+      <div class="tab-pane fade show active" id="practice" role="tabpanel" aria-labelledby="practice-tab">
+        <p id="practice-sentence"></p>
+        <button id="practice-btn" class="btn btn-primary">Play Audio</button>
+        <audio id="practice-audio" controls></audio>
+      </div>
+
+      <!-- Record Mode Content -->
+      <div class="tab-pane fade" id="record" role="tabpanel" aria-labelledby="record-tab">
+        <p id="record-sentence"></p>
+        <button id="record-play-btn" class="btn btn-primary">Play Audio and Record User's Voice</button>
+        <button id="stop-record-btn" class="btn btn-danger" disabled>Stop Recording</button>
+        <audio id="record-audio" controls></audio>
+        <h2>Recorded Audio</h2>
+        <audio id="user-recorded-audio" controls></audio>
+      </div>
+    </div>
+  </div>
+
+  <!-- jQuery and Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+  <script>
+    let mediaRecorder;
+    let recordedChunks = [];
+
+    $(document).ready(function() {
+      // Fetch the sentence for Practice Mode and Record Mode on page load
+      fetch('/get_shadow_sentence')
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.error) {
+            $('#practice-sentence').text('Error: ' + data.error);
+            $('#record-sentence').text('Error: ' + data.error);
+          } else {
+            $('#practice-sentence').text(data.sentence);
+            $('#record-sentence').text(data.sentence);
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching shadow sentence:', error);
+        });
+
+      // Practice Mode: Play Azure Speech Audio 5 times
+      $('#practice-btn').on('click', function() {
+        const sentence = $('#practice-sentence').text();
+        const formData = new FormData();
+        formData.append('sentence', sentence);
+        formData.append('mode', 'practice');  // Indicate Practice Mode
+
+        fetch('/generate_shadow_audio', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.error) {
+            alert('Error: ' + data.error);
+          } else {
+            const audioPlayer = $('#practice-audio');
+            audioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
+            audioPlayer[0].play();  // Play the Azure speech audio 5 times
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching shadow audio:', error);
+        });
+      });
+
+      // Record Mode: Play Azure Speech Audio once and Record User's Voice
+      $('#record-play-btn').on('click', async function() {
+        recordedChunks = [];
+        const sentence = $('#record-sentence').text();
+        const formData = new FormData();
+        formData.append('sentence', sentence);
+        formData.append('mode', 'record');  // Indicate Record Mode
+
+        // Fetch the Azure Speech audio from the server
+        fetch('/generate_shadow_audio', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data.error) {
+            alert('Error: ' + data.error);
+          } else {
+            const audioPlayer = $('#record-audio');
+            audioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
+
+            // Play the Azure speech audio once
+            audioPlayer[0].play();
+
+            // Wait for the audio to start playing, then start recording
+            audioPlayer.on('play', function() {
+              startRecording(); // Start recording when the audio starts
+              $('#stop-record-btn').prop('disabled', false); // Enable the stop button
+            });
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching shadow audio:', error);
+        });
+      });
+
+      // Stop recording when the user clicks stop
+      $('#stop-record-btn').on('click', function() {
+        mediaRecorder.stop();  // Stop the recording
+        $('#stop-record-btn').prop('disabled', true);  // Disable stop button
+
+        mediaRecorder.onstop = function() {
+          const recordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+          const recordedAudioURL = URL.createObjectURL(recordedBlob);
+          const recordedAudio = $('#user-recorded-audio');
+          recordedAudio.attr('src', recordedAudioURL);
+          recordedAudio[0].play();  // Play the user's recorded audio
+        };
+      });
+
+      // Function to start recording user's voice only
+      async function startRecording() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });  // Record audio only from microphone
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = function(event) {
+          if (event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.start();
+      }
+    });
+  </script>
+</body>
+</html>

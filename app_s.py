@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+# import azure.cognitiveservices.speech as speechsdk
 import requests
 import base64
 from pydub import AudioSegment
@@ -8,6 +9,9 @@ import os
 import random
 import csv
 from datetime import datetime
+# import time
+# import json
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,6 +26,8 @@ AZURE_TTS_API_URL = os.getenv('AZURE_TTS_API_URL')
 AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
 AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
+# AZURE_SPEECH_API_KEY = os.getenv('AZURE_SPEECH_API_KEY')  # For Speech API
+# AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')  # Region for Speech API
 
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
@@ -31,6 +37,9 @@ USER_FILE = os.path.join(RESOURCE_PATH, 'users.csv')  # Path to the user data CS
 USER_LOGS_PATH = os.path.join(os.path.dirname(__file__), 'user_logs')
 os.makedirs(USER_LOGS_PATH, exist_ok=True)
 
+# Get the absolute path to the resources folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RESOURCES_FOLDER = os.path.join(BASE_DIR, 'resources')
 
 def log_user_activity(user_id, idiom, example_sentence):
     log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
@@ -223,18 +232,29 @@ def generate_idiom_meaning(idiom):
     else:
         raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login_user():
     if request.method == 'POST':
         user_id = request.form.get('user_id')
         password = request.form.get('password')
+
         if user_id and password:
+            # Assuming check_user_credentials validates and returns the user's name
             user_name = check_user_credentials(user_id, password)
+
             if user_name:
+                # Store user information in the session
                 session['user_id'] = user_id
                 session['user_name'] = user_name
-                return redirect(url_for('index'))
+
+                # Redirect to shadowing page after successful login
+                return redirect(url_for('shadowing'))
+
+        # If login fails, display the error message on the login page
         return render_template('login.html', message='IDとパスワードを入れてください')
+
+    # Render login page for GET request
     return render_template('login.html')
 
 @app.route('/logout')
@@ -246,7 +266,7 @@ def logout():
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))
-    return render_template('index.html', user_name=session.get('user_name'))
+    return render_template('shadowing.html', user_name=session.get('user_name'))
 
 @app.route('/shadow', methods=['POST'])
 def shadow():
@@ -421,6 +441,71 @@ def user_logs():
             })
 
     return jsonify(logs)
+
+
+@app.route('/get_shadow_sentence', methods=['GET'])
+def get_shadow_sentence():
+    # Build the full path to shadow.csv
+    shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
+
+    sentences = []
+    try:
+        with open(shadow_csv_path, mode='r', encoding='utf-8') as file:
+            csv_reader = csv.DictReader(file)
+            for row in csv_reader:
+                sentences.append(row['sentence'])  # Assuming 'sentence' is the column name
+
+        # Randomly select a sentence
+        if sentences:
+            selected_sentence = random.choice(sentences)
+            return jsonify({'sentence': selected_sentence})
+        else:
+            return jsonify({'error': 'No sentences found'}), 500
+    except FileNotFoundError:
+        return jsonify({'error': 'shadow.csv not found'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/generate_shadow_audio', methods=['POST'])
+def generate_shadow_audio():
+    sentence = request.form['sentence']
+    mode = request.form.get('mode', 'practice')  # Default mode is 'practice'
+    try:
+        access_token = get_access_token()  # Assuming this function is defined to get Azure access
+        audio_content = generate_speech(sentence, access_token, 'en-US', 'en-US-JennyNeural')
+
+        combined = AudioSegment.empty()
+
+        if mode == 'practice':
+            # Play the audio 5 times for Practice Mode
+            for _ in range(5):
+                audio_segment = AudioSegment.from_file(BytesIO(audio_content), format="mp3")
+                combined += audio_segment
+        else:
+            # Play the audio once for Record Mode
+            audio_segment = AudioSegment.from_file(BytesIO(audio_content), format="mp3")
+            combined = audio_segment
+
+        # Export combined audio and return as base64
+        buffered = BytesIO()
+        combined.export(buffered, format="mp3")
+        audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+        return jsonify({'audio': audio_base64})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/shadowing', methods=['GET'])
+def shadowing():
+    # Check if the user is logged in before showing shadowing.html
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))  # Redirect to login if not authenticated
+
+    # Render the shadowing.html page if the user is authenticated
+    return render_template('shadowing.html')
+
 
 if __name__ == '__main__':
     app.run(debug=True)

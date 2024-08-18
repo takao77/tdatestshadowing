@@ -258,13 +258,24 @@ def login_user():
                 session['user_name'] = user_name
 
                 # Redirect to shadowing page after successful login
-                return redirect(url_for('shadowing'))
+                return redirect(url_for('home'))
 
         # If login fails, display the error message on the login page
         return render_template('login.html', message='IDとパスワードを入れてください')
 
     # Render login page for GET request
     return render_template('login.html')
+
+
+@app.route('/home')
+def home():
+    # Ensure the user is logged in
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))  # Redirect to login if not authenticated
+
+    # Render the home.html page for course selection
+    return render_template('home.html', user_name=session.get('user_name'))
+
 
 @app.route('/logout')
 def logout():
@@ -454,40 +465,29 @@ def user_logs():
 
 @app.route('/get_shadow_sentence', methods=['GET'])
 def get_shadow_sentence():
-    # Build the full path to shadow.csv
+    # Path to the shadow.csv file
     shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
 
+    selected_course = request.args.get('course')  # Get the selected course from query parameters
     sentences = []
-    encodings_to_try = ['utf-8-sig', 'utf-8', 'shift_jis', 'iso-8859-1']  # Encodings to try
 
-    for encoding in encodings_to_try:
-        try:
-            # Attempt to read the CSV with different encodings
-            with open(shadow_csv_path, mode='r', encoding=encoding) as file:
-                csv_reader = csv.DictReader(file)
-                for row in csv_reader:
-                    sentences.append(row['sentence'])  # Assuming 'sentence' is the column name
+    try:
+        # Open the shadow.csv file with UTF-8-SIG encoding
+        with open(shadow_csv_path, mode='r', encoding='utf-8-sig') as file:
+            csv_reader = csv.DictReader(file)
+            for row in csv_reader:
+                if row['course'] == selected_course:  # Match the selected course
+                    sentences.append(row['sentence'])
 
-            # If we successfully read the file, break out of the loop
-            break
+        # Select a random sentence from the filtered list
+        if sentences:
+            selected_sentence = random.choice(sentences)
+            return jsonify({'sentence': selected_sentence})
+        else:
+            return jsonify({'error': 'No sentences found for the selected course'}), 404
 
-        except UnicodeDecodeError as e:
-            # Log the error and try the next encoding
-            print(f"Failed to read file with encoding {encoding}: {str(e)}")
-            continue  # Try the next encoding
-
-        except FileNotFoundError:
-            return jsonify({'error': 'shadow.csv not found'}), 500
-
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-    # Check if we successfully loaded any sentences
-    if sentences:
-        selected_sentence = random.choice(sentences)
-        return jsonify({'sentence': selected_sentence})
-    else:
-        return jsonify({'error': 'No sentences found or unable to read file'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/generate_shadow_audio', methods=['POST'])
@@ -522,12 +522,15 @@ def generate_shadow_audio():
 
 @app.route('/shadowing', methods=['GET'])
 def shadowing():
-    # Check if the user is logged in before showing shadowing.html
     if 'user_id' not in session:
-        return redirect(url_for('login_user'))  # Redirect to login if not authenticated
+        return redirect(url_for('login_user'))
 
-    # Render the shadowing.html page if the user is authenticated
-    return render_template('shadowing.html')
+    # Get the selected course from the query parameters
+    selected_course = request.args.get('course', '')
+
+    # Pass the selected course to the shadowing.html page
+    return render_template('shadowing.html', user_name=session.get('user_name'), course=selected_course)
+
 
 
 @app.route('/save_recording', methods=['POST'])
@@ -632,6 +635,24 @@ def assess_pronunciation():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+@app.route('/get_courses', methods=['GET'])
+def get_courses():
+    course_csv_path = os.path.join(RESOURCES_FOLDER, 'course.csv')
+    courses = []
+
+    try:
+        with open(course_csv_path, mode='r', encoding='utf-8') as file:
+            csv_reader = csv.DictReader(file)
+            for row in csv_reader:
+                if 'course' in row:  # Ensure 'course' column exists
+                    courses.append(row['course'])
+
+        return jsonify({"courses": courses})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

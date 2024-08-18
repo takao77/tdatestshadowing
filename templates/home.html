@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Your Course</title>
+    <style>
+        body {
+            background-color: #282828;
+            color: white;
+            font-family: 'Roboto', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .container {
+            text-align: center;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        .course-select {
+            margin-bottom: 20px;
+        }
+        .btn {
+            background-color: #3498db;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 16px;
+            color: white;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .icon {
+            font-size: 30px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Select Your Course</h1>
+
+    <!-- Course Dropdown -->
+    <div class="course-select">
+        <label for="course">Choose a course:</label>
+        <select id="course">
+            <!-- Options will be dynamically populated -->
+        </select>
+    </div>
+
+    <!-- Cool Practice Icon Button -->
+    <button class="btn" onclick="startPractice()">
+        <span class="icon">🎧</span> Start Practice
+    </button>
+</div>
+
+<script>
+    // Populate the course dropdown from data retrieved from the server
+    document.addEventListener('DOMContentLoaded', () => {
+        fetch('/get_courses')
+            .then(response => response.json())
+            .then(data => {
+                const courseSelect = document.getElementById('course');
+                if (data.courses) {
+                    data.courses.forEach(course => {
+                        const option = document.createElement('option');
+                        option.value = course;
+                        option.textContent = course;
+                        courseSelect.appendChild(option);
+                    });
+                } else {
+                    console.error('No courses found');
+                }
+            })
+            .catch(error => console.error('Error fetching courses:', error));
+    });
+
+    // Start practice by redirecting to the shadowing page with the selected course
+    function startPractice() {
+        const selectedCourse = document.getElementById('course').value;
+        if (selectedCourse) {
+            window.location.href = `/shadowing?course=${encodeURIComponent(selectedCourse)}`;
+        } else {
+            alert("Please select a course.");
+        }
+    }
+</script>
+
+</body>
+</html>

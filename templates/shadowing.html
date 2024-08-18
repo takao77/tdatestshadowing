@@ -171,19 +171,20 @@
     let savedAudioPath = null;  // Store the path of the saved audio
 
     $(document).ready(function() {
-      // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
-      fetch('/get_shadow_sentence')
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            $('#dynamic-sentence').text('Error: ' + data.error);
-          } else {
-            $('#dynamic-sentence').text(data.sentence);
-            $('#practice-sentence').text(data.sentence);
-            $('#record-sentence').text(data.sentence);
-          }
-        })
-        .catch(error => console.error('Error fetching shadow sentence:', error));
+        const course = "{{ course }}";  // Get the course passed from the backend
+  // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
+  fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
+    .then(response => response.json())
+    .then(data => {
+      if (data.error) {
+        $('#dynamic-sentence').text('Error: ' + data.error);
+      } else {
+        $('#dynamic-sentence').text(data.sentence);
+        $('#practice-sentence').text(data.sentence);
+        $('#record-sentence').text(data.sentence);
+      }
+    })
+    .catch(error => console.error('Error fetching shadow sentence:', error));
 
       // Practice Mode: Play Azure Speech Audio 5 times
       $('#practice-btn').on('click', function() {

@@ -155,6 +155,7 @@
     </div>
   </div>
 
+  <!-- jQuery and Bootstrap JS -->
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 
@@ -163,8 +164,11 @@
     let recordedChunks = [];
     let savedAudioPath = null;  // Store the path of the saved audio
 
-    $(document).ready(function() {
-        const course = "{{ course }}";
+    $(document).ready(async function() {
+        // Request microphone permission when the page loads
+        await requestMicrophonePermission();
+
+        const course = "{{ course }}";  // Get the course passed from the backend
 
         // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
         fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
@@ -240,10 +244,10 @@
           .catch(error => console.error('Error fetching shadow audio:', error));
         });
 
-        // Stop recording when the user clicks stop and send the audio to the backend
+        // Stop recording and save the audio to the backend
         $('#stop-record-btn').on('click', function() {
-          mediaRecorder.stop();  // Stop the recording
-          $('#stop-record-btn').prop('disabled', true);  // Disable stop button
+          mediaRecorder.stop();
+          $('#stop-record-btn').prop('disabled', true);
 
           mediaRecorder.onstop = function() {
             const recordedBlob = new Blob(recordedChunks, { type: 'audio/wav' });
@@ -259,11 +263,11 @@
             .then(data => {
               if (data.success) {
                 alert('Audio saved successfully!');
-                savedAudioPath = data.audio_path;  // Store the path of the saved audio
+                savedAudioPath = data.audio_path;  // Ensure savedAudioPath is correctly updated
                 const recordedAudioURL = URL.createObjectURL(recordedBlob);
                 const userAudioPlayer = $('#user-recorded-audio');
                 userAudioPlayer.attr('src', recordedAudioURL);
-                userAudioPlayer[0].play();  // Play the user's recorded audio
+                userAudioPlayer[0].play();
               } else {
                 alert('Error: ' + data.error);
               }
@@ -272,39 +276,16 @@
           };
         });
 
-        // Function to start recording user's voice only in WAV format
-        async function startRecording() {
-          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            alert('Your browser does not support audio recording.');
-            return;
-          }
-
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          if (!window.MediaRecorder) {
-            alert('MediaRecorder not supported in your browser.');
-            return;
-          }
-
-          mediaRecorder = new MediaRecorder(stream);
-          mediaRecorder.ondataavailable = function(event) {
-            if (event.data.size > 0) {
-              recordedChunks.push(event.data);
-            }
-          };
-
-          mediaRecorder.start();
-        }
-
-        // Assess Pronunciation when the "AI添削" button is clicked
+        // Assess Pronunciation when the "AI 添削" button is clicked
         $('#assess-btn').on('click', function() {
           if (!savedAudioPath) {
             alert('Please record and save your audio first.');
             return;
           }
 
-          const sentence = $('#dynamic-sentence').text();  // Use the dynamic sentence
+          const sentence = $('#dynamic-sentence').text();
           const formData = new FormData();
-          formData.append('audio_path', savedAudioPath);
+          formData.append('audio_path', savedAudioPath);  // Use the path of the saved audio
           formData.append('sentence', sentence);
 
           // Send the request to the server for pronunciation assessment
@@ -328,8 +309,59 @@
           })
           .catch(error => console.error('Error assessing pronunciation:', error));
         });
+
+        // Request microphone access permission on page load
+        async function requestMicrophonePermission() {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+              alert('Your browser does not support audio recording.');
+              return;
+          }
+
+          try {
+              // Request microphone access
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+              // Stop all tracks after permission is granted, so microphone is not in use until recording starts
+              stream.getTracks().forEach(track => track.stop());
+
+              console.log('Microphone permission granted');
+          } catch (error) {
+              console.error('Microphone permission denied:', error);
+              alert('Microphone access denied or unavailable. You will not be able to record audio.');
+          }
+        }
+
+        // Function to start recording user's voice
+        async function startRecording() {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            if (!window.MediaRecorder) {
+              alert('MediaRecorder not supported in your browser. Please try using Chrome.');
+              return;
+            }
+
+            mediaRecorder = new MediaRecorder(stream);
+            recordedChunks = [];
+
+            mediaRecorder.ondataavailable = function(event) {
+              if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+              }
+            };
+
+            mediaRecorder.start();
+            console.log('Recording started...');
+
+          } catch (error) {
+            console.error('Error accessing microphone:', error);
+            alert('Microphone access denied or unavailable.');
+          }
+        }
+
     });
 
+    // Function to switch between tabs
     function showTab(tabName) {
       document.querySelectorAll('.tab-content').forEach(function(tab) {
         tab.classList.remove('active');
@@ -340,6 +372,7 @@
       });
       event.currentTarget.classList.add('active');
     }
+
   </script>
 
 </body>

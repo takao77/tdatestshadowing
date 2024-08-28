@@ -310,6 +310,26 @@
             alert('Microphone access denied or unavailable.');
           });
         }
+
+        // Re-request permissions if device changes (e.g., earphones plugged/unplugged)
+        navigator.mediaDevices.ondevicechange = function(event) {
+          console.log('Device changed:', event);
+          // Stop current recorder
+          if (recorder && recorder.stream) {
+            recorder.stream.getTracks().forEach(track => track.stop());
+          }
+          // Re-request microphone access
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(function(stream) {
+              recorder = RecordRTC(stream, {
+                type: 'audio',
+                mimeType: 'audio/wav'
+              });
+              console.log('Switched to new audio input device');
+            }).catch(function(error) {
+              console.error('Error re-acquiring microphone:', error);
+            });
+        };
     });
 
     // Function to switch between tabs

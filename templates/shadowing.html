@@ -197,8 +197,11 @@
               alert('Error: ' + data.error);
             } else {
               const audioPlayer = $('#practice-audio');
+              // Ensure user interaction triggers playback
               audioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
-              audioPlayer[0].play();
+              audioPlayer[0].play().catch(error => {
+                console.error('Playback failed:', error);
+              });
             }
           })
           .catch(error => console.error('Error fetching shadow audio:', error));
@@ -222,7 +225,9 @@
             } else {
               const azureAudioPlayer = $('#record-audio');
               azureAudioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
-              azureAudioPlayer[0].play();
+              azureAudioPlayer[0].play().catch(error => {
+                console.error('Playback failed:', error);
+              });
 
               // Start recording user's voice when the audio starts playing
               azureAudioPlayer[0].onplay = function() {

@@ -163,9 +163,19 @@
     let mediaRecorder;
     let recordedChunks = [];
     let savedAudioPath = null;  // Store the path of the saved audio
+    let audioStream; // Store the audio stream for reuse
 
-    $(document).ready(function() {
+    $(document).ready(async function() {
         const course = "{{ course }}";  // Get the course passed from the backend
+
+        // Request microphone access once and store the stream
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          console.log('Microphone access granted.');
+        } catch (error) {
+          console.error('Error accessing microphone:', error);
+          alert('Microphone access denied or unavailable.');
+        }
 
         // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
         fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
@@ -207,7 +217,7 @@
         });
 
         // Record Mode: Start recording user's voice
-        $('#record-play-btn').on('click', async function() {
+        $('#record-play-btn').on('click', function() {
           const sentence = $('#dynamic-sentence').text();
           const formData = new FormData();
           formData.append('sentence', sentence);
@@ -245,53 +255,55 @@
 
         // Function to start recording with WebRTC
         function startRecording() {
-          navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
-            mediaRecorder = new MediaRecorder(stream);
+          if (!audioStream) {
+            alert('Microphone is not available.');
+            return;
+          }
 
-            mediaRecorder.ondataavailable = function(event) {
-              if (event.data.size > 0) {
-                recordedChunks.push(event.data);
-              }
-            };
+          mediaRecorder = new MediaRecorder(audioStream);
 
-            mediaRecorder.start();
-            console.log('Recording started...');
-          }).catch(function(error) {
-            console.error('Error accessing microphone:', error);
-            alert('Microphone access denied or unavailable.');
-          });
+          mediaRecorder.ondataavailable = function(event) {
+            if (event.data.size > 0) {
+              recordedChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.start();
+          console.log('Recording started...');
         }
 
         // Function to stop recording and handle the recorded audio
         function stopRecording() {
-          mediaRecorder.stop();
-          console.log('Recording stopped.');
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            mediaRecorder.stop();
+            console.log('Recording stopped.');
 
-          mediaRecorder.onstop = function() {
-            const blob = new Blob(recordedChunks, { type: 'audio/wav' });
-            const formData = new FormData();
-            formData.append('audio_data', blob, 'user_recording.wav');
+            mediaRecorder.onstop = function() {
+              const blob = new Blob(recordedChunks, { type: 'audio/wav' });
+              const formData = new FormData();
+              formData.append('audio_data', blob, 'user_recording.wav');
 
-            fetch('/save_recording', {
-              method: 'POST',
-              body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-              if (data.success) {
-                alert('Audio saved successfully!');
-                savedAudioPath = data.audio_path;  // Ensure savedAudioPath is correctly updated
-                const recordedAudioURL = URL.createObjectURL(blob);
-                $('#user-recorded-audio').attr('src', recordedAudioURL);
-                $('#user-recorded-audio')[0].play();
-              } else {
-                alert('Error: ' + data.error);
-              }
-            })
-            .catch(error => console.error('Error saving audio:', error));
-          };
+              fetch('/save_recording', {
+                method: 'POST',
+                body: formData
+              })
+              .then(response => response.json())
+              .then(data => {
+                if (data.success) {
+                  alert('Audio saved successfully!');
+                  savedAudioPath = data.audio_path;  // Ensure savedAudioPath is correctly updated
+                  const recordedAudioURL = URL.createObjectURL(blob);
+                  $('#user-recorded-audio').attr('src', recordedAudioURL);
+                  $('#user-recorded-audio')[0].play();
+                } else {
+                  alert('Error: ' + data.error);
+                }
+              })
+              .catch(error => console.error('Error saving audio:', error));
+            };
 
-          $('#stop-record-btn').prop('disabled', true);
+            $('#stop-record-btn').prop('disabled', true);
+          }
         }
 
         // Assess Pronunciation when the "AI 添削" button is clicked
@@ -338,7 +350,7 @@
           // Re-request microphone access
           navigator.mediaDevices.getUserMedia({ audio: true })
             .then(function(stream) {
-              mediaRecorder = new MediaRecorder(stream);
+              audioStream = stream;
               console.log('Switched to new audio input device');
             }).catch(function(error) {
               console.error('Error re-acquiring microphone:', error);

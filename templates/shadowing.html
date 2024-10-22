@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shadowing Practice with Gen Z Style</title>
+  <title>Shadowing Practice</title>
   <!-- FontAwesome for Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <!-- Google Fonts -->
@@ -16,7 +16,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      min-height: 100vh;
       margin: 0;
       padding: 0;
     }
@@ -25,8 +25,10 @@
       padding: 30px;
       border-radius: 15px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-      max-width: 400px;
+      max-width: 500px;
+      width: 90%;
       text-align: center;
+      position: relative;
     }
     h1 {
       font-size: 1.2rem;
@@ -109,6 +111,24 @@
     .logout-btn:hover {
       background-color: #95a5a6;
     }
+    /* Styles for the Next Button */
+    .next-button-container {
+      margin-top: 30px;
+      display: flex;
+      justify-content: center;
+    }
+    .icon-btn.blue {
+      font-size: 50px;
+      color: #3498db; /* Blue color */
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, color 0.3s;
+    }
+    .icon-btn.blue:hover {
+      transform: scale(1.1);
+      color: #5dade2;
+    }
   </style>
 </head>
 <body>
@@ -120,8 +140,8 @@
 
     <!-- Tabs for Practice Mode and Record Mode -->
     <div class="tab">
-      <button class="active" onclick="showTab('practice')">練習モード</button>
-      <button onclick="showTab('record')">録音モード</button>
+      <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
+      <button onclick="showTab(event, 'record')">録音モード</button>
     </div>
 
     <!-- Tab Content -->
@@ -153,11 +173,18 @@
       </button>
       <div id="assessment-result"></div>
     </div>
+
+    <!-- Next Button -->
+    <div class="next-button-container">
+      <button id="next-btn" class="icon-btn blue">
+        <i class="fas fa-arrow-right"></i>
+      </button>
+    </div>
+
   </div>
 
   <!-- jQuery and Bootstrap JS -->
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 
   <script>
     let mediaRecorder;
@@ -177,17 +204,13 @@
           alert('Microphone access denied or unavailable.');
         }
 
-        // Fetch the dynamic sentence for Practice Mode and Record Mode from the backend (CSV)
-        fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
-          .then(response => response.json())
-          .then(data => {
-            if (data.error) {
-              $('#dynamic-sentence').text('Error: ' + data.error);
-            } else {
-              $('#dynamic-sentence').text(data.sentence);
-            }
-          })
-          .catch(error => console.error('Error fetching shadow sentence:', error));
+        // Fetch the initial sentence
+        fetchSentence();
+
+        // Handle 'Next' button click
+        $('#next-btn').on('click', function() {
+          fetchSentence();
+        });
 
         // Practice Mode: Play Azure Speech Audio 5 times
         $('#practice-btn').on('click', function() {
@@ -262,6 +285,8 @@
 
           mediaRecorder = new MediaRecorder(audioStream);
 
+          recordedChunks = []; // Clear previous recordings
+
           mediaRecorder.ondataavailable = function(event) {
             if (event.data.size > 0) {
               recordedChunks.push(event.data);
@@ -290,7 +315,7 @@
               .then(response => response.json())
               .then(data => {
                 if (data.success) {
-                  alert('Audio saved successfully!');
+                  // alert('Audio saved successfully!');
                   savedAudioPath = data.audio_path;  // Ensure savedAudioPath is correctly updated
                   const recordedAudioURL = URL.createObjectURL(blob);
                   $('#user-recorded-audio').attr('src', recordedAudioURL);
@@ -359,7 +384,7 @@
     });
 
     // Function to switch between tabs
-    function showTab(tabName) {
+    function showTab(event, tabName) {
       document.querySelectorAll('.tab-content').forEach(function(tab) {
         tab.classList.remove('active');
       });
@@ -368,6 +393,34 @@
         button.classList.remove('active');
       });
       event.currentTarget.classList.add('active');
+    }
+
+    // Function to fetch a new sentence and reset relevant elements
+    function fetchSentence() {
+      const course = "{{ course }}";  // Get the course passed from the backend
+      fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.error) {
+            $('#dynamic-sentence').text('Error: ' + data.error);
+          } else {
+            $('#dynamic-sentence').text(data.sentence);
+            // Reset audio sources and assessment result
+            $('#practice-audio').attr('src', '');
+            $('#record-audio').attr('src', '');
+            $('#user-recorded-audio').attr('src', '');
+            $('#assessment-result').html('');
+            // Disable stop record button
+            $('#stop-record-btn').prop('disabled', true);
+            // Clear recorded chunks
+            recordedChunks = [];
+            // Stop any ongoing recordings
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+              mediaRecorder.stop();
+            }
+          }
+        })
+        .catch(error => console.error('Error fetching shadow sentence:', error));
     }
   </script>
 

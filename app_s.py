@@ -50,6 +50,38 @@ USER_AUDIO_PATH = os.path.join(os.path.dirname(__file__), 'user_audio')
 os.makedirs(USER_AUDIO_PATH, exist_ok=True)
 
 
+def log_practice_activity(user_id, course, sentence):
+    """
+    Appends a new practice record to practice_logs.csv in the resources folder.
+    Storing only DateTime, UserID, Course, and Sentence.
+    added on 6.4.2025
+    """
+    practice_log_path = os.path.join(RESOURCE_PATH, 'practice_logs.csv')
+    file_exists = os.path.isfile(practice_log_path)
+
+    # Current timestamp
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Define the CSV headers
+    fieldnames = ['DateTime', 'UserID', 'Course', 'Sentence']
+
+    # Open the CSV file in append mode
+    with open(practice_log_path, mode='a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        # If it's a brand new file, write the header first
+        if not file_exists:
+            writer.writeheader()
+
+        # Write the row
+        writer.writerow({
+            'DateTime': timestamp,
+            'UserID': user_id,
+            'Course': course,
+            'Sentence': sentence
+        })
+
+
 def log_user_activity(user_id, idiom, example_sentence):
     log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
     file_exists = os.path.isfile(log_file_path)
@@ -468,20 +500,34 @@ def get_shadow_sentence():
     # Path to the shadow.csv file
     shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
 
-    selected_course = request.args.get('course')  # Get the selected course from query parameters
+    # 1) Check if user is logged in
+    if 'user_id' not in session:
+        return jsonify({"error": "User not logged in"}), 403
+
+    # 2) Get user ID from session
+    user_id = session['user_id']
+
+    # 3) Get the selected course from the query parameter
+    selected_course = request.args.get('course', '')
+
     sentences = []
 
     try:
-        # Open the shadow.csv file with UTF-8-SIG encoding
+        # 4) Read shadow.csv and collect sentences matching the selected course
         with open(shadow_csv_path, mode='r', encoding='utf-8-sig') as file:
             csv_reader = csv.DictReader(file)
             for row in csv_reader:
-                if row['course'] == selected_course:  # Match the selected course
+                if row['course'] == selected_course:
                     sentences.append(row['sentence'])
 
-        # Select a random sentence from the filtered list
+        # 5) If there are sentences, pick a random one
         if sentences:
             selected_sentence = random.choice(sentences)
+
+            # 6) LOG the practice activity right here
+            log_practice_activity(user_id, selected_course, selected_sentence)
+
+            # 7) Return the chosen sentence as JSON
             return jsonify({'sentence': selected_sentence})
         else:
             return jsonify({'error': 'No sentences found for the selected course'}), 404

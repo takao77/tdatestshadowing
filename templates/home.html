@@ -59,6 +59,12 @@
     <button class="btn" onclick="startPractice()">
         <span class="icon">🎧</span> Start Practice
     </button>
+
+    <!-- ↓ 追加するHistoryボタン -->
+    <button class="btn" onclick="goToHistory()">
+        <i class="fas fa-history icon"></i>History
+    </button>
+
 </div>
 
 <script>
@@ -90,6 +96,12 @@
         } else {
             alert("Please select a course.");
         }
+
+    }
+
+    // 新規追加: 履歴ページへ移動
+    function goToHistory() {
+        window.location.href = "/history";
     }
 </script>
 

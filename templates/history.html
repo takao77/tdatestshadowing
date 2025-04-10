@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Your History</title>
+
+  <!-- もしFontAwesome等のアイコンを使うならCDNリンクを配置 -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+  />
+
+  <style>
+    body {
+      background-color: #1e1e1e;
+      color: #fff;
+      font-family: 'Roboto', sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    #history-container {
+      width: 90%;
+      margin: 0 auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px 12px;
+      text-align: center;
+    }
+    th {
+      background-color: #333;
+    }
+    /* テーブル行をホバーでハイライトする例 */
+    tr:hover {
+      background-color: #2c2c2c;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Your Practice History</h1>
+
+  <div id="history-container">
+    <!-- JSで作ったテーブルをここに挿入 -->
+    <p>Loading...</p>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      // ページ読み込み時に /user_logs をfetchする
+      fetch('/user_logs')
+        .then(response => response.json())
+        .then(data => {
+          // dataがエラーの場合（{error:...}等）
+          if (!Array.isArray(data)) {
+            document.getElementById("history-container").innerHTML =
+              "<p style='color:red;'>Error: " + JSON.stringify(data) + "</p>";
+            return;
+          }
+
+          // ログが空ならメッセージを表示
+          if (data.length === 0) {
+            document.getElementById("history-container").innerHTML =
+              "<p>No history found.</p>";
+            return;
+          }
+
+          // テーブル生成
+          const table = document.createElement("table");
+
+          // テーブルヘッダ
+          const thead = document.createElement("thead");
+          thead.innerHTML = `
+            <tr>
+              <th>Date/Time</th>
+              <th>User ID</th>
+              <th>Course / Idiom</th>
+              <th>Example Sentence</th>
+            </tr>
+          `;
+          table.appendChild(thead);
+
+          // テーブルボディ
+          const tbody = document.createElement("tbody");
+          data.forEach(log => {
+            // log は { date, user_id, idiom, example_sentence } 等の形
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${log.date}</td>
+              <td>${log.user_id}</td>
+              <td>${log.idiom}</td>
+              <td>${log.example_sentence}</td>
+            `;
+            tbody.appendChild(row);
+          });
+          table.appendChild(tbody);
+
+          // 既存のLoading...を消してテーブルを表示
+          const container = document.getElementById("history-container");
+          container.innerHTML = "";
+          container.appendChild(table);
+        })
+        .catch(err => {
+          document.getElementById("history-container").innerHTML =
+            "<p style='color:red;'>Fetch error: " + err + "</p>";
+        });
+    });
+  </script>
+
+</body>
+</html>

@@ -9,6 +9,7 @@ import os
 import random
 import csv
 from datetime import datetime
+import pyodbc
 import time
 import json
 import difflib
@@ -48,6 +49,47 @@ USER_AUDIO_PATH = os.path.join(os.path.dirname(__file__), 'user_audio')
 
 # Ensure the 'user_audio' folder exists
 os.makedirs(USER_AUDIO_PATH, exist_ok=True)
+
+
+def get_db_connection():
+    """
+    Azure Web App のアプリ設定 `AZURE_SQL_CONNECTION_STRING` を使ってDB接続を返す。
+    """
+    conn_str = os.getenv("AZURE_SQL_CONNECTION_STRING")
+    if not conn_str:
+        raise ValueError("AZURE_SQL_CONNECTION_STRING is not set or empty.")
+
+    # pyodbcで接続
+    conn = pyodbc.connect(conn_str)
+    return conn
+
+
+def log_practice_activity_db(user_id, course, sentence):
+    """
+    practice_logs テーブルにログをINSERTする。
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 例: INSERT
+        sql = """
+        INSERT INTO practice_logs (log_datetime, user_id, course, sentence)
+        VALUES (?, ?, ?, ?)
+        """
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cursor.execute(sql, now_str, user_id, course, sentence)
+        conn.commit()
+
+        print("Inserted log to practice_logs successfully.")
+    except Exception as e:
+        print(f"Error inserting log to DB: {e}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 def log_practice_activity(user_id, course, sentence):
@@ -439,7 +481,6 @@ def get_idiom():
         combined.export(buffered, format="mp3")
         audio_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-        log_user_activity(user_id, idiom, example_sentence)
 
     except Exception as e:
         error_message = f"Error generating speech: {str(e)}"
@@ -448,86 +489,94 @@ def get_idiom():
 
     return jsonify({'idiom': idiom, 'meaning': meaning, 'example': example_sentence, 'audio': audio_base64})
 
-@app.route('/user_logs', methods=['GET', 'DELETE'])
+
+@app.route('/user_logs', methods=['GET'])
 def user_logs():
     if 'user_id' not in session:
         return jsonify({"error": "User not logged in"}), 403
 
     user_id = session['user_id']
-    log_file_path = os.path.join(USER_LOGS_PATH, f'{user_id}.csv')
 
-    if not os.path.exists(log_file_path):
-        return jsonify([])
+    # cursor変数を先に宣言しておく
+    conn = None
+    cursor = None
 
-    if request.method == 'DELETE':
-        data = request.get_json()
-        idiom = data.get('idiom')
-        example_sentence = data.get('example_sentence')
-        updated_logs = []
+    try:
+        conn = get_db_connection()  # ← ここで失敗する場合がある
+        cursor = conn.cursor()  # ← ここに到達しないと cursor が未定義
 
-        # Read all logs except the one to delete
-        with open(log_file_path, 'r', newline='', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                if row['Idiom'] != idiom or row['Example Sentence'] != example_sentence:
-                    updated_logs.append(row)
+        # SQL実行の例
+        sql = """
+        SELECT log_datetime, user_id, course, sentence
+        FROM practice_logs
+        WHERE user_id = ?
+        ORDER BY log_datetime DESC
+        """
+        cursor.execute(sql, user_id)
+        rows = cursor.fetchall()
 
-        # Write the updated logs back to the file
-        with open(log_file_path, 'w', newline='', encoding='utf-8') as file:
-            writer = csv.DictWriter(file, fieldnames=['Date', 'User ID', 'Idiom', 'Example Sentence'])
-            writer.writeheader()
-            writer.writerows(updated_logs)
-
-        return jsonify({"success": True})
-
-    # If method is GET, return logs
-    logs = []
-    with open(log_file_path, 'r', newline='', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
+        logs = []
+        for row in rows:
             logs.append({
-                'date': row['Date'],
-                'user_id': row['User ID'],
-                'idiom': row['Idiom'],
-                'example_sentence': row['Example Sentence']
+                'date': str(row.log_datetime),
+                'user_id': row.user_id,
+                'idiom': row.course,
+                'example_sentence': row.sentence
             })
 
-    return jsonify(logs)
+        return jsonify(logs)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        # cursor や conn が None でない場合のみ close する
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route('/history')
+def show_history():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('history.html')
 
 
 @app.route('/get_shadow_sentence', methods=['GET'])
 def get_shadow_sentence():
-    # Path to the shadow.csv file
+    # CSVファイルへのパス
     shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
 
-    # 1) Check if user is logged in
+    # 1) セッションでユーザがログインしているか確認
     if 'user_id' not in session:
         return jsonify({"error": "User not logged in"}), 403
 
-    # 2) Get user ID from session
+    # 2) ログイン中のユーザIDを取り出す
     user_id = session['user_id']
 
-    # 3) Get the selected course from the query parameter
+    # 3) クエリパラメータ course=? で指定されたコース名を取得
     selected_course = request.args.get('course', '')
 
     sentences = []
 
     try:
-        # 4) Read shadow.csv and collect sentences matching the selected course
+        # 4) shadow.csv を読み込み、course列が選択したコースに一致するものを集める
         with open(shadow_csv_path, mode='r', encoding='utf-8-sig') as file:
             csv_reader = csv.DictReader(file)
             for row in csv_reader:
                 if row['course'] == selected_course:
                     sentences.append(row['sentence'])
 
-        # 5) If there are sentences, pick a random one
+        # 5) 1つ以上マッチしたらランダムに1行を選択
         if sentences:
             selected_sentence = random.choice(sentences)
 
-            # 6) LOG the practice activity right here
-            log_practice_activity(user_id, selected_course, selected_sentence)
+            # 6) ログを追記する（CSVまたはDBなど）
+            log_practice_activity_db(user_id, selected_course, selected_sentence)
 
-            # 7) Return the chosen sentence as JSON
+            # 7) 選んだ文章をJSONで返す
             return jsonify({'sentence': selected_sentence})
         else:
             return jsonify({'error': 'No sentences found for the selected course'}), 404

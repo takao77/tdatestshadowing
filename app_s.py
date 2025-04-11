@@ -28,7 +28,7 @@ AZURE_TTS_ENDPOINT = os.getenv('AZURE_TTS_ENDPOINT')
 AZURE_TTS_API_URL = os.getenv('AZURE_TTS_API_URL')
 AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
-AZURE_OPENAI_DEPLOYMENT_NAME = 'tdaflaskmodel'  # Hardcoded deployment name
+AZURE_OPENAI_DEPLOYMENT_NAME = 'tda_4'  # Hardcoded deployment name
 AZURE_SPEECH_API_KEY = os.getenv('AZURE_SPEECH_API_KEY')  # For Speech API
 AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')  # Region for Speech API
 
@@ -64,7 +64,9 @@ def get_db_connection():
     return conn
 
 
-def log_practice_activity_db(user_id, course, sentence):
+def log_practice_activity_db(user_id, course, sentence, word):
+    conn = None
+    cursor = None
     """
     practice_logs テーブルにログをINSERTする。
     """
@@ -74,12 +76,12 @@ def log_practice_activity_db(user_id, course, sentence):
 
         # 例: INSERT
         sql = """
-        INSERT INTO practice_logs (log_datetime, user_id, course, sentence)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO practice_logs (log_datetime, user_id, course, sentence, word)
+        VALUES (?, ?, ?, ?, ?)
         """
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        cursor.execute(sql, now_str, user_id, course, sentence)
+        cursor.execute(sql, now_str, user_id, course, sentence, word)
         conn.commit()
 
         print("Inserted log to practice_logs successfully.")
@@ -507,7 +509,7 @@ def user_logs():
 
         # SQL実行の例
         sql = """
-        SELECT log_datetime, user_id, course, sentence
+        SELECT log_datetime, user_id, course, sentence, word
         FROM practice_logs
         WHERE user_id = ?
         ORDER BY log_datetime DESC
@@ -517,11 +519,13 @@ def user_logs():
 
         logs = []
         for row in rows:
+            # 変更後 (wordも追加)
             logs.append({
                 'date': str(row.log_datetime),
                 'user_id': row.user_id,
-                'idiom': row.course,
-                'example_sentence': row.sentence
+                'course': row.course,
+                'sentence': row.sentence,
+                'word': row.word
             })
 
         return jsonify(logs)
@@ -560,6 +564,7 @@ def get_shadow_sentence():
     selected_course = request.args.get('course', '')
 
     sentences = []
+    entries = []
 
     try:
         # 4) shadow.csv を読み込み、course列が選択したコースに一致するものを集める
@@ -567,17 +572,28 @@ def get_shadow_sentence():
             csv_reader = csv.DictReader(file)
             for row in csv_reader:
                 if row['course'] == selected_course:
-                    sentences.append(row['sentence'])
+                    entries.append({
+                        'sentence': row.get('sentence', ''),
+                        'word': row.get('word', ''),  # ★ 追加
+                        'translated': row.get('translated', ''),
+                        'tips': row.get('tips', ''),
+                        'sequence': row.get('sequence', ''),
+                    })
 
-        # 5) 1つ以上マッチしたらランダムに1行を選択
-        if sentences:
-            selected_sentence = random.choice(sentences)
+        if entries:
+            selected_entry = random.choice(entries)
 
             # 6) ログを追記する（CSVまたはDBなど）
-            log_practice_activity_db(user_id, selected_course, selected_sentence)
+            log_practice_activity_db(user_id, selected_course, selected_entry['sentence'], selected_entry['word'])
 
             # 7) 選んだ文章をJSONで返す
-            return jsonify({'sentence': selected_sentence})
+            return jsonify({
+                'sentence': selected_entry['sentence'],
+                'word': selected_entry['word'],  # ★ 追加
+                'translated': selected_entry['translated'],
+                'tips': selected_entry['tips'],
+                'sequence': selected_entry['sequence']
+            })
         else:
             return jsonify({'error': 'No sentences found for the selected course'}), 404
 
@@ -748,6 +764,111 @@ def get_courses():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/generate_explanation', methods=['POST'])
+def generate_explanation():
+    """
+    Receives a sentence and returns a Japanese explanation
+    with details for English learners. Uses Azure OpenAI.
+    """
+    try:
+        sentence = request.form.get('sentence', '').strip()
+        word = request.form.get('word', '').strip()
+        if not sentence:
+            return jsonify({"error": "No sentence provided."}), 400
+
+        prompt = f"""
+1. 以下の英文: 
+\"{sentence}\"
+について、日本語の訳を述べる
+２．次に
+単語 '{word}'
+について、語源や覚えるためのコツを語学学習者のために解説してください。
+"""
+
+        headers = {
+            'Content-Type': 'application/json',
+            'api-key': AZURE_OPENAI_API_KEY,
+        }
+
+        data = {
+            "messages": [
+                {"role": "system", "content": "You are an assistant that explains English sentences in Japanese for learners."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 400
+        }
+
+        # POSTリクエスト
+        import requests
+        response = requests.post(
+            f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+            headers=headers,
+            json=data
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            explanation_text = response_data["choices"][0]["message"]["content"].strip()
+            return jsonify({"explanation": explanation_text})
+        else:
+            return jsonify({"error": f"OpenAI Error {response.status_code}: {response.text}"}), 500
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/generate_explanation_cn', methods=['POST'])
+def generate_explanation_cn():
+    try:
+        sentence = request.form.get('sentence', '').strip()
+        word = request.form.get('word', '').strip()
+        if not sentence:
+            return jsonify({"error": "No sentence provided"}), 400
+
+        # 中国語向けのPrompt
+        prompt = f"""
+        以下的英文：
+        「{sentence}」
+
+        1. 请先用中文进行翻译，并对整个句子做一个通俗易懂的解释。
+        2. 对其中的单词「{word}」，请说明它的词源、记忆方法或相关有趣故事，以帮助学习者更好地掌握这个单词。
+
+        请用友好、易于理解的口吻来回答，并尽量提供详细的说明。
+        """
+
+        headers = {
+            'Content-Type': 'application/json',
+            'api-key': AZURE_OPENAI_API_KEY,
+        }
+
+        data = {
+            "messages": [
+                {"role": "system",
+                 "content": "You are an assistant that explains English sentences in Japanese for learners."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 400
+        }
+
+        # POSTリクエスト
+        import requests
+        response = requests.post(
+            f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
+            headers=headers,
+            json=data
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            explanation_text = response_data["choices"][0]["message"]["content"].strip()
+            return jsonify({"explanation": explanation_text})
+        else:
+            return jsonify({"error": f"OpenAI Error {response.status_code}: {response.text}"}), 500
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

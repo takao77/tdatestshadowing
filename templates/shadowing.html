@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shadowing Practice</title>
   <!-- FontAwesome for Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css"
+            integrity="sha512-..."
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+    />
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
@@ -129,11 +135,33 @@
       transform: scale(1.1);
       color: #5dade2;
     }
+
+    /* 左上に配置するモダンな“家”アイコン */
+    .home-link {
+        position: absolute;
+        top: 15px;
+        left: 20px;
+        color: #fff;
+        font-size: 30px; /* アイコンの大きさ */
+        text-decoration: none;
+        transition: color 0.3s, transform 0.3s;
+    }
+
+    .home-link:hover {
+      color: #3498db;      /* ホバー時に青色へ */
+      transform: scale(1.1);
+    }
+
   </style>
 </head>
 <body>
 
-  <a href="/logout" class="logout-btn">Logout</a>
+<!-- 左上の“家”アイコン (chimney-window付き) -->
+<a href="/home" class="home-link">
+    <i class="fa-solid fa-house-chimney-window"></i>
+</a>
+
+<a href="/logout" class="logout-btn">Logout</a>
 
   <div class="container">
     <h1 id="dynamic-sentence">Loading sentence...</h1> <!-- Dynamic sentence will be populated here -->
@@ -141,7 +169,8 @@
     <!-- Tabs for Practice Mode and Record Mode -->
     <div class="tab">
       <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
-      <button onclick="showTab(event, 'record')">録音モード</button>
+        <button onclick="showTab(event, 'explanation')">解説モード</button>
+        <button onclick="showTab(event, 'record')">録音モード</button>
     </div>
 
     <!-- Tab Content -->
@@ -151,6 +180,24 @@
       </button>
       <audio id="practice-audio" controls></audio>
     </div>
+
+      <!-- ★ 解説モード -->
+      <div id="explanation" class="tab-content">
+          <!-- Word を表示する要素 -->
+          <p style="display: none;" id="explanation-word-wrap">
+              <strong>Word:</strong> <span id="explanation-word"></span>
+          </p>
+          <!-- 解説を取得するボタン -->
+          <button id="explain-btn" style="font-size:1rem; padding:10px;">
+              解説を見る
+          </button>
+          <!-- 2) 查看解释（中文用）-->
+          <button id="explain-btn-cn" style="font-size:1rem; padding:10px; margin-left:10px;">
+              查看解释
+          </button>
+          <!-- Azure OpenAI で生成した説明を入れる場所 -->
+          <div id="explanation-content" style="margin-top:20px; text-align:left; white-space:pre-wrap;"></div>
+      </div>
 
     <div id="record" class="tab-content">
       <div class="icon-container">
@@ -381,7 +428,66 @@
               console.error('Error re-acquiring microphone:', error);
             });
         };
+// ★ [1] 「解説を見る」ボタンのクリックイベントを紐づけ
+        $('#explain-btn').on('click', function () {
+            const sentence = $('#dynamic-sentence').text();
+            explainSentence(sentence);
+        });
+// ★ (2) 「查看解释」ボタン（中国語）
+        $('#explain-btn-cn').on('click', function () {
+            const sentence = $('#dynamic-sentence').text();
+            explainSentenceChinese(sentence);  // 中国語向け関数を呼ぶ
+        });
     });
+
+// ★ 新しく解説をfetchする関数
+    function explainSentence(sentence) {
+      const formData = new FormData();
+      formData.append('sentence', sentence);
+      formData.append('word', currentWord);
+
+      fetch('/generate_explanation', {
+        method: 'POST',
+        body: formData
+      })
+      .then(resp => resp.json())
+      .then(data => {
+        if (data.error) {
+          $('#explanation-content').text('Error: ' + data.error);
+        } else {
+          // 生成された説明文を表示
+          $('#explanation-content').text(data.explanation);
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        $('#explanation-content').text('Error: ' + err);
+      });
+    }
+
+    // 中国語版
+    function explainSentenceChinese(sentence) {
+        const formData = new FormData();
+        formData.append('sentence', sentence);
+        formData.append('word', currentWord);
+
+        fetch('/generate_explanation_cn', {  // 例: 別のAPIにする
+            method: 'POST',
+            body: formData
+        })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.error) {
+                        $('#explanation-content').text('Error: ' + data.error);
+                    } else {
+                        $('#explanation-content').text(data.explanation);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    $('#explanation-content').text('Error: ' + err);
+                });
+    }
 
     // Function to switch between tabs
     function showTab(event, tabName) {
@@ -393,6 +499,15 @@
         button.classList.remove('active');
       });
       event.currentTarget.classList.add('active');
+// ★ もしexplanationタブのみでwordを表示したいなら
+        if (tabName === 'explanation') {
+            // 表示:
+            $('#explanation-word-wrap').show();  // あるいはCSSでdisplayをコントロール
+            $('#explanation-word').text(currentWord);
+        } else {
+            // 他のタブでは隠す
+            $('#explanation-word-wrap').hide();
+        }
     }
 
     // Function to fetch a new sentence and reset relevant elements
@@ -404,6 +519,9 @@
           if (data.error) {
             $('#dynamic-sentence').text('Error: ' + data.error);
           } else {
+              currentSentence = data.sentence;
+              currentWord = data.word; // ★ 取得して保持
+
             $('#dynamic-sentence').text(data.sentence);
             // Reset audio sources and assessment result
             $('#practice-audio').attr('src', '');
@@ -422,6 +540,8 @@
         })
         .catch(error => console.error('Error fetching shadow sentence:', error));
     }
+
+
   </script>
 
 </body>

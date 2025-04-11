@@ -81,10 +81,11 @@
           const thead = document.createElement("thead");
           thead.innerHTML = `
             <tr>
-              <th>Date/Time</th>
-              <th>User ID</th>
-              <th>Course / Idiom</th>
-              <th>Example Sentence</th>
+                <th>Date/Time</th>
+                <th>User ID</th>
+                <th>Course</th>
+                <th>Sentence</th>
+                <th>Word</th> <!-- ★ 追加 -->
             </tr>
           `;
           table.appendChild(thead);
@@ -94,12 +95,12 @@
           data.forEach(log => {
             // log は { date, user_id, idiom, example_sentence } 等の形
             const row = document.createElement("tr");
-            row.innerHTML = `
-              <td>${log.date}</td>
-              <td>${log.user_id}</td>
-              <td>${log.idiom}</td>
-              <td>${log.example_sentence}</td>
-            `;
+              row.innerHTML =
+                      "<td>" + log.date + "</td>" +
+                      "<td>" + log.user_id + "</td>" +
+                      "<td>" + log.course + "</td>" +
+                      "<td>" + log.sentence + "</td>" +
+                      "<td>" + (log.word ? log.word : "") + "</td>";
             tbody.appendChild(row);
           });
           table.appendChild(tbody);

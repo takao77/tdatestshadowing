@@ -10,6 +10,7 @@ import random
 import csv
 from datetime import datetime
 import pyodbc
+import bcrypt
 import time
 import json
 import difflib
@@ -18,6 +19,18 @@ import string
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def hash_password(plain_password):
+    plain_bytes = plain_password.encode('utf-8')
+    hashed = bcrypt.hashpw(plain_bytes, bcrypt.gensalt())
+    return hashed.decode('utf-8')  # 文字列に変換
+
+def check_password(plain_password, hashed_password):
+    plain_bytes = plain_password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(plain_bytes, hashed_bytes)
+
 
 app = Flask(__name__)
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
@@ -325,21 +338,36 @@ def login_user():
         password = request.form.get('password')
 
         if user_id and password:
-            # Assuming check_user_credentials validates and returns the user's name
-            user_name = check_user_credentials(user_id, password)
+            # 1) DBから user_id のレコードを取得
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = "SELECT password_hash, name FROM users WHERE user_id = ?"
+            cursor.execute(sql, user_id)
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
 
-            if user_name:
-                # Store user information in the session
-                session['user_id'] = user_id
-                session['user_name'] = user_name
+            if row:
+                db_password_hash = row.password_hash
+                db_user_name = row.name
 
-                # Redirect to shadowing page after successful login
-                return redirect(url_for('home'))
+                # 2) 入力されたパスワードがハッシュと一致するかチェック
+                if check_password(password, db_password_hash):
+                    # 3) 一致したらセッションに保存してログイン成功
+                    session['user_id'] = user_id
+                    session['user_name'] = db_user_name
+                    return redirect(url_for('home'))
+                else:
+                    # パスワード不一致
+                    return render_template('login.html', message='パスワードが違います')
+            else:
+                # user_idが見つからない
+                return render_template('login.html', message='ユーザーが存在しません')
 
-        # If login fails, display the error message on the login page
+            # user_id または password が空の場合
         return render_template('login.html', message='IDとパスワードを入れてください')
 
-    # Render login page for GET request
+    # GET の場合はログイン画面を返す
     return render_template('login.html')
 
 

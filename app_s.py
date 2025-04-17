@@ -578,52 +578,42 @@ def show_history():
 
 @app.route('/get_shadow_sentence', methods=['GET'])
 def get_shadow_sentence():
-    # CSVファイルへのパス
-    shadow_csv_path = os.path.join(RESOURCES_FOLDER, 'shadow.csv')
-
-    # 1) セッションでユーザがログインしているか確認
+    # 1) 認証チェック
     if 'user_id' not in session:
         return jsonify({"error": "User not logged in"}), 403
-
-    # 2) ログイン中のユーザIDを取り出す
     user_id = session['user_id']
 
-    # 3) クエリパラメータ course=? で指定されたコース名を取得
+    # 2) クエリパラメータから course を取得
     selected_course = request.args.get('course', '')
 
-    sentences = []
-    entries = []
-
     try:
-        # 4) shadow.csv を読み込み、course列が選択したコースに一致するものを集める
-        with open(shadow_csv_path, mode='r', encoding='utf-8-sig') as file:
-            csv_reader = csv.DictReader(file)
-            for row in csv_reader:
-                if row['course'] == selected_course:
-                    entries.append({
-                        'sentence': row.get('sentence', ''),
-                        'word': row.get('word', ''),  # ★ 追加
-                        'translated': row.get('translated', ''),
-                        'tips': row.get('tips', ''),
-                        'sequence': row.get('sequence', ''),
-                    })
+        # 3) SQL から sentence と word を取得
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT sentence, word
+              FROM dbo.vocab_items
+             WHERE course = ?
+            """,
+            selected_course
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
 
-        if entries:
-            selected_entry = random.choice(entries)
+        # 4) データがなければ 404
+        if not rows:
+            return jsonify({'error': 'No sentences found for this course'}), 404
 
-            # 6) ログを追記する（CSVまたはDBなど）
-            log_practice_activity_db(user_id, selected_course, selected_entry['sentence'], selected_entry['word'])
+        # 5) ランダムに１件選択
+        sentence, word = random.choice(rows)
 
-            # 7) 選んだ文章をJSONで返す
-            return jsonify({
-                'sentence': selected_entry['sentence'],
-                'word': selected_entry['word'],  # ★ 追加
-                'translated': selected_entry['translated'],
-                'tips': selected_entry['tips'],
-                'sequence': selected_entry['sequence']
-            })
-        else:
-            return jsonify({'error': 'No sentences found for the selected course'}), 404
+        # 6) ログ保存（DB版） — 今回は word も渡す
+        log_practice_activity_db(user_id, selected_course, sentence, word)
+
+        # 7) JSON で返却
+        return jsonify({'sentence': sentence, 'word': word})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -829,7 +819,6 @@ def generate_explanation():
         }
 
         # POSTリクエスト
-        import requests
         response = requests.post(
             f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
             headers=headers,

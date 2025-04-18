@@ -152,6 +152,21 @@
       transform: scale(1.1);
     }
 
+    .rating-btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .rating-btn:hover {
+      background: #2980b9;
+      transform: scale(1.1);
+    }
+
   </style>
 </head>
 <body>
@@ -221,11 +236,13 @@
       <div id="assessment-result"></div>
     </div>
 
-    <!-- Next Button -->
-    <div class="next-button-container">
-      <button id="next-btn" class="icon-btn blue">
-        <i class="fas fa-arrow-right"></i>
-      </button>
+    <!-- 新: 自己評価ボタン -->
+    <div class="rating-container" style="margin-top:30px; display:flex; justify-content:center; gap:10px;">
+      <button class="rating-btn" data-score="1">1</button>
+      <button class="rating-btn" data-score="2">2</button>
+      <button class="rating-btn" data-score="3">3</button>
+      <button class="rating-btn" data-score="4">4</button>
+      <button class="rating-btn" data-score="5">5</button>
     </div>
 
   </div>
@@ -238,6 +255,9 @@
     let recordedChunks = [];
     let savedAudioPath = null;  // Store the path of the saved audio
     let audioStream; // Store the audio stream for reuse
+    let currentVocabId = null;
+    let currentWord = null;
+    let currentSentence = null;
 
     $(document).ready(async function() {
         const course = "{{ course }}";  // Get the course passed from the backend
@@ -254,10 +274,33 @@
         // Fetch the initial sentence
         fetchSentence();
 
-        // Handle 'Next' button click
-        $('#next-btn').on('click', function() {
-          fetchSentence();
+        $('.rating-btn').on('click', async function () {
+            const score = $(this).data('score');
+            const form = new FormData();
+            form.append('vocab_id', currentVocabId);
+            form.append('self_score', score);
+
+            try {
+                const res = await fetch('/submit_practice', {method: 'POST', body: form});
+                const json = await res.json();
+                if (json.error) {
+                    alert('送信エラー: ' + json.error);
+                    return;
+                }
+                // 次の問題をロード
+                loadNextPracticeItem();
+            } catch (err) {
+                console.error(err);
+                alert('送信失敗: ' + err);
+            }
         });
+
+        // --- (3) loadNextPracticeItem() の定義 ---
+        function loadNextPracticeItem() {
+          // 次のシャドーイング用文章＋単語を取得し、
+          // 画面をリセットして再表示させる
+          fetchSentence();
+        }
 
         // Practice Mode: Play Azure Speech Audio 5 times
         $('#practice-btn').on('click', function() {
@@ -508,37 +551,43 @@
             // 他のタブでは隠す
             $('#explanation-word-wrap').hide();
         }
+        if (tabName === 'practice') {
+          $('.rating-container').show();
+        } else {
+          $('.rating-container').hide();
+        }
     }
 
     // Function to fetch a new sentence and reset relevant elements
     function fetchSentence() {
-      const course = "{{ course }}";  // Get the course passed from the backend
-      fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            $('#dynamic-sentence').text('Error: ' + data.error);
-          } else {
-              currentSentence = data.sentence;
-              currentWord = data.word; // ★ 取得して保持
+        const course = "{{ course }}";
+        console.log("⚙️ fetchSentence() called with course:", course);
 
-            $('#dynamic-sentence').text(data.sentence);
-            // Reset audio sources and assessment result
-            $('#practice-audio').attr('src', '');
-            $('#record-audio').attr('src', '');
-            $('#user-recorded-audio').attr('src', '');
-            $('#assessment-result').html('');
-            // Disable stop record button
-            $('#stop-record-btn').prop('disabled', true);
-            // Clear recorded chunks
-            recordedChunks = [];
-            // Stop any ongoing recordings
-            if (mediaRecorder && mediaRecorder.state === "recording") {
-              mediaRecorder.stop();
-            }
-          }
-        })
-        .catch(error => console.error('Error fetching shadow sentence:', error));
+        fetch(`/api/get_due_vocab?course=${encodeURIComponent(course)}`)
+                .then(resp => {
+                    console.log("⚙️ HTTP status:", resp.status);
+                    return resp.json();
+                })
+                .then(data => {
+                    console.log("⚙️ /api/get_due_vocab response:", data);
+                    if (!Array.isArray(data) || data.length === 0) {
+                        $('#dynamic-sentence').text('📚 練習すべき項目がありません');
+                        $('.rating-container').hide();
+                        return;
+                    }
+                    // 配列の先頭を使う場合
+                    const item = data[0];
+                    currentVocabId = item.vocab_id;
+                    currentSentence = item.sentence;
+                    currentWord = item.word;
+
+                    $('#dynamic-sentence').text(currentSentence);
+                    $('.rating-container').show();
+                })
+                .catch(err => {
+                    console.error("⚠️ fetchSentence error:", err);
+                    $('#dynamic-sentence').text('🚨 読み込みエラー');
+                });
     }
 
 

@@ -4,6 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Select Your Course</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+            integrity="sha512-jLKHWM+jlEKaGmKkD+wQlYBuW37QvYdRU+Blb10W+K0N1jeq7P+cOJX8RwP+dFdwXKZ7xh6nf+X3g6Xw1sP5ZA=="
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+    />
     <style>
         body {
             background-color: #282828;
@@ -32,6 +42,7 @@
             cursor: pointer;
             font-size: 16px;
             color: white;
+            margin: 5px;
         }
         .btn:hover {
             background-color: #2980b9;
@@ -103,6 +114,25 @@
     function goToHistory() {
         window.location.href = "/history";
     }
+
+    function goToReview() {
+        const c = document.getElementById('course').value;
+        if (!c) {
+            alert('Please select a course.');
+            return;
+        }
+        window.location.href = `/review?course=${encodeURIComponent(c)}`;
+    }
+
+    function goToTest() {
+        const c = document.getElementById('course').value;
+        if (!c) {
+            alert('Please select a course.');
+            return;
+        }
+        window.location.href = `/test?course=${encodeURIComponent(c)}`;
+    }
+
 </script>
 
 </body>

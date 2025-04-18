@@ -8,13 +8,15 @@ from dotenv import load_dotenv
 import os
 import random
 import csv
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pyodbc
 import bcrypt
+import re
 import time
 import json
 import difflib
 import string
+import math
 
 
 # Load environment variables from .env file
@@ -30,6 +32,51 @@ def check_password(plain_password, hashed_password):
     plain_bytes = plain_password.encode('utf-8')
     hashed_bytes = hashed_password.encode('utf-8')
     return bcrypt.checkpw(plain_bytes, hashed_bytes)
+
+
+def calculate_ef_with_decay(
+    ef_old: float,
+    self_score: int,
+    repetitions: int,
+    days_since: float,
+    lam: float = 0.1,
+    alpha: float = 0.3,
+    beta: float = 0.1,
+    perfect_boost: float = 2.0,
+    min_ef: float = 0.8
+) -> float:
+    """
+    時間減衰付き EF 更新モデル（改訂版）
+
+    ef_old        : 前回の EF
+    self_score    : 自己評価 (0～5)
+    repetitions   : これまでのレビュー回数
+    days_since    : 前回レビューからの経過日数
+    lam           : 減衰率 λ
+    alpha, beta   : 自己評価・反復回数の重み
+    perfect_boost : 自己評価5時にEFを増加, 1時は逆数で減少
+    min_ef        : EF の下限
+
+    1) S = self_score / 5
+    2) R = ln(1 + repetitions)
+    3) D = exp(-lam * days_since)
+    4) EF_base = ef_old * D + α·S + β·R
+    5) self_score==5 のとき EF_base *= perfect_boost
+       self_score==1 のとき EF_base /= perfect_boost
+    6) EF_new = max(min_ef, EF_base)
+    """
+    S = self_score / 5.0
+    R = math.log1p(repetitions)
+    D = math.exp(-lam * days_since)
+
+    ef_base = ef_old * D + alpha * S + beta * R
+
+    if self_score == 5:
+        ef_base *= perfect_boost
+    elif self_score == 1:
+        ef_base /= perfect_boost
+
+    return max(min_ef, ef_base)
 
 
 app = Flask(__name__)
@@ -523,50 +570,47 @@ def get_idiom():
 @app.route('/user_logs', methods=['GET'])
 def user_logs():
     if 'user_id' not in session:
-        return jsonify({"error": "User not logged in"}), 403
+        return jsonify({'error': 'User not logged in'}), 403
 
     user_id = session['user_id']
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-    # cursor変数を先に宣言しておく
-    conn = None
-    cursor = None
+    sql = """
+        SELECT 
+          vr.review_time,
+          vi.course,
+          vi.sentence,
+          vi.word,
+          vr.self_score,
+          vr.test_score,
+          vr.ef,
+          vr.next_review
+        FROM dbo.vocab_reviews vr
+        JOIN dbo.vocab_items vi 
+          ON vr.vocab_id = vi.id
+        WHERE vr.user_id = ?
+        ORDER BY vr.review_time DESC
+    """
+    cursor.execute(sql, user_id)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
 
-    try:
-        conn = get_db_connection()  # ← ここで失敗する場合がある
-        cursor = conn.cursor()  # ← ここに到達しないと cursor が未定義
+    logs = []
+    for row in rows:
+        logs.append({
+            'date':         row.review_time.isoformat(),
+            'course':       row.course,
+            'sentence':     row.sentence,
+            'word':         row.word,
+            'self_score':   row.self_score,
+            'test_score':   row.test_score,
+            'ef':           row.ef,
+            'next_review':  row.next_review.isoformat() if row.next_review else ''
+        })
 
-        # SQL実行の例
-        sql = """
-        SELECT log_datetime, user_id, course, sentence, word
-        FROM practice_logs
-        WHERE user_id = ?
-        ORDER BY log_datetime DESC
-        """
-        cursor.execute(sql, user_id)
-        rows = cursor.fetchall()
-
-        logs = []
-        for row in rows:
-            # 変更後 (wordも追加)
-            logs.append({
-                'date': str(row.log_datetime),
-                'user_id': row.user_id,
-                'course': row.course,
-                'sentence': row.sentence,
-                'word': row.word
-            })
-
-        return jsonify(logs)
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    finally:
-        # cursor や conn が None でない場合のみ close する
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+    return jsonify(logs)
 
 
 @app.route('/history')
@@ -886,6 +930,129 @@ def generate_explanation_cn():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/get_due_vocab', methods=['GET'])
+def get_due_vocab():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    # クエリパラメータから選択コースを取得
+    course = request.args.get('course', '')
+    if not course:
+        return jsonify({'error': 'course パラメータが必要です'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # vocab_items を母集合にし、
+    # 各 vocab_id ごとに最新の review_time レコードから next_review を取り出して結合
+    cursor.execute(
+        """
+        SELECT 
+          vi.id      AS vocab_id, 
+          vi.sentence, 
+          vi.word
+        FROM dbo.vocab_items vi
+        LEFT JOIN (
+          SELECT vocab_id, next_review
+          FROM (
+            SELECT 
+              vocab_id,
+              next_review,
+              ROW_NUMBER() OVER (
+                PARTITION BY vocab_id 
+                ORDER BY review_time DESC
+              ) AS rn
+            FROM dbo.vocab_reviews
+            WHERE user_id = ?
+          ) t
+          WHERE t.rn = 1
+        ) vr 
+          ON vi.id = vr.vocab_id
+        WHERE 
+          vi.course = ?
+        ORDER BY 
+          ISNULL(vr.next_review, '1900-01-01') ASC
+        """,
+        user_id, course
+    )
+
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    # レスポンス用に整形
+    due = [{
+        'vocab_id': row.vocab_id,
+        'sentence': row.sentence,
+        'word': row.word
+    } for row in rows]
+
+    return jsonify(due)
+
+
+@app.route('/submit_practice', methods=['POST'])
+def submit_practice():
+    user_id    = session.get('user_id')
+    vocab_id   = request.form.get('vocab_id', type=int)
+    self_score = request.form.get('self_score', type=int)
+
+    if not user_id or not vocab_id or self_score is None:
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # --- 1) 最新レビューを取得 ---
+    cursor.execute("""
+        SELECT TOP 1
+           ef,
+           review_time,
+           COUNT(*) OVER (PARTITION BY user_id, vocab_id) AS reps
+        FROM dbo.vocab_reviews
+        WHERE user_id = ? AND vocab_id = ?
+        ORDER BY review_time DESC
+    """, user_id, vocab_id)
+    row = cursor.fetchone()
+
+    if row:
+        prev_ef    = row.ef or 2.5
+        last_time  = row.review_time
+        reps       = row.reps + 1
+        days_since = max((datetime.utcnow() - last_time).days, 0)
+    else:
+        prev_ef    = 2.5   # 初回 EF
+        reps       = 1
+        days_since = 0
+
+    # --- 2) EF を計算 ---
+    new_ef = calculate_ef_with_decay(
+        ef_old=prev_ef,
+        self_score=self_score,
+        repetitions=reps,
+        days_since=days_since
+    )
+
+    # --- 3) 次回レビュー日時を決定 ---
+    next_review = datetime.utcnow() + timedelta(days=new_ef)
+
+    # --- 4) レビュー履歴を INSERT ---
+    cursor.execute("""
+        INSERT INTO dbo.vocab_reviews
+          (user_id, vocab_id, review_time, self_score, ef, next_review)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, user_id, vocab_id, datetime.utcnow(), self_score, new_ef, next_review)
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({
+        'ef': round(new_ef, 2),
+        'next_review': next_review.isoformat()
+    })
 
 
 if __name__ == '__main__':

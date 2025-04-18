@@ -938,7 +938,6 @@ def get_due_vocab():
     if not user_id:
         return jsonify({'error': 'ログインしてください'}), 403
 
-    # クエリパラメータから選択コースを取得
     course = request.args.get('course', '')
     if not course:
         return jsonify({'error': 'course パラメータが必要です'}), 400
@@ -946,21 +945,23 @@ def get_due_vocab():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # vocab_items を母集合にし、
-    # 各 vocab_id ごとに最新の review_time レコードから next_review を取り出して結合
+    # 最新の review_time と next_review を取り出しつつ、
+    # 直近 20 分以内にレビューされたものは除外し、
+    # next_review の未来／過去を問わず全件を取得
     cursor.execute(
         """
         SELECT 
-          vi.id      AS vocab_id, 
+          vi.id       AS vocab_id, 
           vi.sentence, 
           vi.word
         FROM dbo.vocab_items vi
         LEFT JOIN (
-          SELECT vocab_id, next_review
+          SELECT vocab_id, next_review, review_time
           FROM (
             SELECT 
               vocab_id,
               next_review,
+              review_time,
               ROW_NUMBER() OVER (
                 PARTITION BY vocab_id 
                 ORDER BY review_time DESC
@@ -973,6 +974,10 @@ def get_due_vocab():
           ON vi.id = vr.vocab_id
         WHERE 
           vi.course = ?
+          AND (
+            vr.review_time IS NULL
+            OR vr.review_time <= DATEADD(minute, -10, GETUTCDATE())
+          )
         ORDER BY 
           ISNULL(vr.next_review, '1900-01-01') ASC
         """,
@@ -983,11 +988,10 @@ def get_due_vocab():
     cursor.close()
     conn.close()
 
-    # レスポンス用に整形
     due = [{
         'vocab_id': row.vocab_id,
         'sentence': row.sentence,
-        'word': row.word
+        'word':     row.word
     } for row in rows]
 
     return jsonify(due)

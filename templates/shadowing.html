@@ -342,7 +342,14 @@
 
         // --- (C) 次の問題読み込み＆モード切替 ---
         function loadNextPracticeItem() {
-            // まず新しい問題を取得
+            // 1) dictationAnswered フラグをリセット
+                dictationAnswered = false;
+            // 2) 「確認」ボタンを有効化
+                $('#dictation-submit').prop('disabled', false);
+            // 3) 入力欄とフィードバックもクリア
+                $('#dictation-input').val('');
+                $('#dictation-feedback').text('');
+                $('#dictation-next').hide();
             fetchSentence().then(() => {
                 // EF によってシャドーイング or ディクテーションに切り替え
                 if (currentEF >= 3) {
@@ -369,8 +376,14 @@
         }
 
         // ── (E) Dictation: 「確認」ボタンのクリックハンドラ ──
+        let dictationAnswered = false;  // ← 追加
+
         $('#dictation-submit').on('click', async function() {
-          const userInput = $('#dictation-input').val().trim();
+            if (dictationAnswered) return;    // すでに一度押されたら何もしない
+            dictationAnswered = true;         // フラグを立てる
+            $(this).prop('disabled', true);   // ボタンを無効化
+
+            const userInput = $('#dictation-input').val().trim();
           // 1) 英文と回答を正規化：空白・句読点を除去、小文字化
           const normalize = str => str.replace(/[^\w\s]|_/g, "").toLowerCase();
           const normalizedInput  = normalize(userInput);

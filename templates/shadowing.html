@@ -166,7 +166,6 @@
       background: #2980b9;
       transform: scale(1.1);
     }
-
   </style>
 </head>
 <body>
@@ -195,6 +194,47 @@
       </button>
       <audio id="practice-audio" controls></audio>
     </div>
+
+<!--?    <div class="icon-container" style="justify-content: center; margin-bottom: 10px;">-->
+<!--?      <button id="dictation-play-btn" class="icon-btn">-->
+<!--?        <i class="fas fa-play"></i>-->
+<!--?      </button>-->
+<!--?    </div>-->
+<!--?    <audio id="dictation-audio" controls style="display: none; margin: 0 auto 10px;"></audio>-->
+
+      <!-- ★ ここからディクテーション用 UI を追加 -->
+      <div id="dictation-container" style="display: none; margin-top: 20px;">
+          <!-- Dictation 用再生ボタン -->
+          <div class="icon-container" style="justify-content: center; margin-bottom: 10px;">
+              <button id="dictation-play-btn" class="icon-btn">
+                  <i class="fas fa-play"></i>
+              </button>
+          </div>
+          <!-- Dictation 用オーディオ -->
+          <audio id="dictation-audio" controls style="margin: 0 auto 10px;"></audio>
+          <!-- ユーザーが聴いた英文を入力するテキストフィールド -->
+          <input
+                  id="dictation-input"
+                  type="text"
+                  placeholder="ここに学習した単語のみ入力してください"
+                  style="width: 100%; padding: 8px; font-size: 1rem; border-radius: 4px; border: none;"
+          />
+          <!-- 入力後に正誤判定を行うボタン -->
+          <button
+                  id="dictation-submit"
+                  style="margin-top: 10px; padding: 8px 16px; font-size: 1rem; border-radius: 4px; background: #1abc9c; color: white; border: none; cursor: pointer;"
+          >
+              確認
+          </button>
+          <!-- 判定結果を表示する場所 -->
+          <p id="dictation-feedback" style="margin-top:10px; font-size:1rem;"></p>
+          <!-- 次に進む矢印ボタン（正解・不正解後に表示） -->
+          <div class="next-button-container" style="margin-top: 20px;">
+              <button id="dictation-next" class="icon-btn blue" style="display: none;">
+                  <i class="fas fa-arrow-right"></i>
+              </button>
+          </div>
+      </div>
 
       <!-- ★ 解説モード -->
       <div id="explanation" class="tab-content">
@@ -258,6 +298,7 @@
     let currentVocabId = null;
     let currentWord = null;
     let currentSentence = null;
+    let currentEF         = null;
 
     $(document).ready(async function() {
         const course = "{{ course }}";  // Get the course passed from the backend
@@ -287,6 +328,10 @@
                     alert('送信エラー: ' + json.error);
                     return;
                 }
+
+                // ここで新しい EF 値をキャッチしておく
+                currentEF = json.ef;
+
                 // 次の問題をロード
                 loadNextPracticeItem();
             } catch (err) {
@@ -295,12 +340,102 @@
             }
         });
 
-        // --- (3) loadNextPracticeItem() の定義 ---
+        // --- (C) 次の問題読み込み＆モード切替 ---
         function loadNextPracticeItem() {
-          // 次のシャドーイング用文章＋単語を取得し、
-          // 画面をリセットして再表示させる
-          fetchSentence();
+            // まず新しい問題を取得
+            fetchSentence().then(() => {
+                // EF によってシャドーイング or ディクテーションに切り替え
+                if (currentEF >= 3) {
+                    enterDictationMode();
+                    // ← 古い audio をクリア
+                    $('#dictation-audio').attr('src', '').hide();
+                } else {
+                    enterShadowMode();
+                }
+            });
         }
+
+        // --- (D) UI 切替用関数 ---
+        // シャドーイング用のボタン・音声再生UIを表示／ディクテーションUIを隠す
+        function enterShadowMode() {
+            $('#dynamic-sentence, #practice-btn, #practice-audio, .rating-container').show();
+            $('#dictation-container').hide();
+        }
+
+        // ディクテーション用UIを表示／シャドーイングUIを隠す
+        function enterDictationMode() {
+            $('#dynamic-sentence, #practice-btn, #practice-audio, .rating-container').hide();
+            $('#dictation-container').show();
+        }
+
+        // ── (E) Dictation: 「確認」ボタンのクリックハンドラ ──
+        $('#dictation-submit').on('click', async function() {
+          const userInput = $('#dictation-input').val().trim();
+          // 1) 英文と回答を正規化：空白・句読点を除去、小文字化
+          const normalize = str => str.replace(/[^\w\s]|_/g, "").toLowerCase();
+          const normalizedInput  = normalize(userInput);
+          const normalizedAnswer = normalize(currentWord);
+
+          // 2) 正誤判定
+          const isCorrect = normalizedInput === normalizedAnswer;
+
+          // 3) 自己評価を送信 (5点 or 3点)
+          try {
+            const form = new FormData();
+            form.append('vocab_id',    currentVocabId);
+            form.append('self_score',  isCorrect ? 5 : 2);
+            await fetch('/submit_practice', { method:'POST', body: form });
+          } catch(err) {
+            console.error('dictation submit error', err);
+          }
+
+          // 4) フィードバック表示
+          if (isCorrect) {
+            $('#dictation-feedback').text('✅ 正解です！');
+          } else {
+            $('#dictation-feedback').html(
+              '❌ 不正解… 正しい文はこちらです：<br>' +
+              currentSentence
+            );
+          }
+
+          // 5) 「次へ」ボタンを出す
+          $('#dictation-next').show();
+        });
+
+        // ── (F) Dictation: 次へボタンのクリックハンドラ ──
+        $('#dictation-next').on('click', function() {
+          // リセット
+          $('#dictation-input').val('');
+          $('#dictation-feedback').text('');
+          $('#dictation-next').hide();
+          // 次の問題へ
+          loadNextPracticeItem();
+        });
+
+        // ── (G) Dictation: audio play ボタン ──
+        $('#dictation-play-btn').off('click').on('click', async function() {
+          if (!currentSentence) return;  // safety
+
+          // 1) ツールに投げるフォームを作る
+          const form = new FormData();
+          form.append('sentence', currentSentence);
+
+          try {
+            // 2) サーバーで speech audio を生成
+            const resp = await fetch('/generate_shadow_audio', { method:'POST', body: form });
+            const data = await resp.json();
+            if (data.error) throw data.error;
+
+            // 3) audio タグにセットして再生
+            const audioEl = $('#dictation-audio');
+            audioEl.attr('src', 'data:audio/mp3;base64,' + data.audio);
+            audioEl.show()[0].play();
+          } catch(err) {
+            console.error('Dictation audio error:', err);
+            alert('音声の取得に失敗しました: ' + err);
+          }
+        });
 
         // Practice Mode: Play Azure Speech Audio 5 times
         $('#practice-btn').on('click', function() {
@@ -561,26 +696,21 @@
     // Function to fetch a new sentence and reset relevant elements
     function fetchSentence() {
         const course = "{{ course }}";
-        console.log("⚙️ fetchSentence() called with course:", course);
-
-        fetch(`/api/get_due_vocab?course=${encodeURIComponent(course)}`)
-                .then(resp => {
-                    console.log("⚙️ HTTP status:", resp.status);
-                    return resp.json();
-                })
+        return fetch(`/api/get_due_vocab?course=${encodeURIComponent(course)}`)
+                .then(response => response.json())
                 .then(data => {
-                    console.log("⚙️ /api/get_due_vocab response:", data);
                     if (!Array.isArray(data) || data.length === 0) {
                         $('#dynamic-sentence').text('📚 練習すべき項目がありません');
                         $('.rating-container').hide();
                         return;
                     }
-                    // 配列の先頭を使う場合
+                    // 先頭のアイテムを取得
                     const item = data[0];
                     currentVocabId = item.vocab_id;
                     currentSentence = item.sentence;
                     currentWord = item.word;
 
+                    // 画面に反映
                     $('#dynamic-sentence').text(currentSentence);
                     $('.rating-container').show();
                 })

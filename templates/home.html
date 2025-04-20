@@ -6,14 +6,15 @@
     <title>Select Your Course</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome for Icons -->
+
+    <!-- FontAwesome for Icons (v6.4.0) -->
     <link
             rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
-            integrity="sha512-jLKHWM+jlEKaGmKkD+wQlYBuW37QvYdRU+Blb10W+K0N1jeq7P+cOJX8RwP+dFdwXKZ7xh6nf+X3g6Xw1sP5ZA=="
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
             crossorigin="anonymous"
             referrerpolicy="no-referrer"
     />
+
     <style>
         body {
             background-color: #282828;
@@ -51,9 +52,50 @@
             font-size: 30px;
             margin-top: 20px;
         }
+
+        .logout-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: #888; /* グレー */
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+        }
+
+        .logout-btn:hover {
+            background-color: #aaa;
+        }
+        /* head 内のスタイルに追加してください */
+        .bottom-left-icons {
+          position: absolute;
+          bottom: 20px;
+          left: 20px;
+          display: flex;
+          gap: 16px;
+        }
+
+        .icon-btn {
+            font-size: 2rem;
+            color: #3498db;
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s, color 0.3s;
+            padding: 0;
+        }
+
+        .icon-btn:hover {
+            transform: scale(1.1);
+            color: #5dade2;
+        }
     </style>
 </head>
 <body>
+<!-- ログアウトボタン -->
+<a href="/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
 
 <div class="container">
     <h1>Select Your Course</h1>
@@ -71,10 +113,17 @@
         <span class="icon">🎧</span> Start Practice
     </button>
 
-    <!-- ↓ 追加するHistoryボタン -->
-    <button class="btn" onclick="goToHistory()">
-        <i class="fas fa-history icon"></i>History
-    </button>
+    <!-- 左下アイコン群 -->
+    <div class="bottom-left-icons">
+        <!-- コース管理 -->
+        <button class="icon-btn" title="コース管理" onclick="location.href='/admin/courses'">
+            <i class="fas fa-cog"></i>
+        </button>
+        <!-- 履歴ページ -->
+        <button class="icon-btn" title="履歴" onclick="goToHistory()">
+            <i class="fas fa-history"></i>
+        </button>
+    </div>
 
 </div>
 

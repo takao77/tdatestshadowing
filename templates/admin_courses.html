@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>コース管理</title>
+    <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+    />
+    <style>
+    body { background: #f5f5f5; color: #333; font-family: sans-serif; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 1em; }
+    form { max-width: 600px; margin: auto 0 2em; padding: 1em; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    form input, form select { width: calc(100% - 12px); padding: 6px; margin-bottom: 1em; border: 1px solid #ccc; border-radius: 4px; }
+    form label { display: block; margin-bottom: 0.5em; }
+    form button { padding: 8px 16px; border: none; border-radius: 4px; background: #3498db; color: #fff; cursor: pointer; }
+    form button:hover { background: #2980b9; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; }
+    .toggle-btn { cursor: pointer; color: #3498db; }
+    .toggle-btn.off { color: #ccc; }
+    .delete-btn { color: #e74c3c; cursor: pointer; }
+    /* CSS に追加 */
+    .public-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;       /* チェック ⇄ 文字 の間隔 */
+      margin-top: 1em;    /* 上に少し余白 */
+      cursor: pointer; /* ラベル全体がクリック可能に */
+    }
+
+    /* 既存の form label のスタイルが影響している場合は上書き */
+    form label {
+      margin-bottom: .5em; /* もし上下余白が大きければ調整 */
+    }
+    /* ボタン行は下にまとめ */
+    .form-actions {
+      margin-top: 1em;    /* ラベルとの間にスペース */
+    }
+
+    /* ボタンをブロック要素にして幅いっぱいにしてもOK */
+    .form-actions button {
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>コース管理画面</h1>
+
+  <!-- 追加フォーム -->
+  <form id="add-course-form">
+    <label for="course-name">コース名：</label>
+    <input type="text" id="course-name" placeholder="例: TOEIC 初級" required>
+
+    <label for="course-language">言語カテゴリー：</label>
+    <select id="course-language">
+      <option value="en">English</option>
+      <option value="zh">中文</option>
+      <option value="jp-kanji">日本語（漢字）</option>
+    </select>
+
+      <label for="course-public" class="public-label">
+          <input type="checkbox" id="course-public" checked>
+          <span>公開する</span>
+      </label>
+
+  <!-- ボタンは改行してブロックで配置 -->
+  <div class="form-actions">
+      <button type="submit">
+          <i class="fas fa-plus"></i> コースを追加
+      </button>
+  </div>
+  </form>
+
+  <!-- 一覧テーブル -->
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>コース名</th>
+        <th>言語</th>
+        <th>公開</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="courses-tbody">
+      <!-- JS で埋め込み -->
+    </tbody>
+  </table>
+
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+      async function fetchCourses() {
+          const res = await fetch('/api/get_courses_admin');
+          const data = await res.json();
+          const $tbody = $('#courses-tbody').empty();
+
+          data.courses.forEach(course => {
+              const pubClass = course.is_public ? '' : 'off';
+              $tbody.append(`
+            <tr data-id="${course.id}">
+              <td>${course.id}</td>
+              <td>${course.name}</td>
+              <td>${course.language}</td>
+              <td>
+                <i class="fas fa-toggle-${course.is_public ? 'on' : 'off'} toggle-btn ${pubClass}"
+                   data-public="${course.is_public}"
+                   title="公開/非公開切替"></i>
+              </td>
+              <td>
+                <!-- 編集アイコンを確実に表示 -->
+                <i class="fas fa-edit edit-btn"
+                   style="cursor:pointer; color:#f39c12; margin-right:8px;"
+                   title="コース編集"></i>
+                <!-- 削除アイコン -->
+                <i class="fas fa-trash delete-btn"
+                   style="cursor:pointer; color:#e74c3c;"
+                   title="コース削除"></i>
+              </td>
+            </tr>
+          `);
+          });
+      }
+
+      // 編集／削除のハンドラも合わせて再定義
+      $('#courses-tbody')
+              .on('click', '.edit-btn', async function () {
+                  const $tr = $(this).closest('tr');
+                  const id = $tr.data('id');
+                  const name = prompt('新しいコース名を入力してください', $tr.find('td:nth-child(2)').text());
+                  if (!name) return;
+                  const lang = prompt('新しい言語コードを入力してください (en, zh, jp-kanji)', $tr.find('td:nth-child(3)').text());
+                  if (!lang) return;
+                  const pub = $tr.find('.toggle-btn').data('public') ? 1 : 0;
+                  const res = await fetch('/api/update_course', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({course_id: id, name, language: lang, is_public: pub})
+                  });
+                  if (res.ok) fetchCourses();
+                  else alert('更新に失敗しました');
+              })
+              .on('click', '.delete-btn', async function () {
+                  if (!confirm('本当に削除しますか？')) return;
+                  const id = $(this).closest('tr').data('id');
+                  const res = await fetch(`/api/delete_course/${id}`, {method: 'DELETE'});
+                  if (res.ok) fetchCourses();
+                  else alert('削除に失敗しました');
+              });
+
+      // ページロード時に呼び出し
+      $(document).ready(fetchCourses);
+      // 追加フォーム送信ハンドラ（これがないと /api/create_course にリクエストされません）
+      $('#add-course-form').on('submit', async function (e) {
+          e.preventDefault();
+          const name = $('#course-name').val().trim();
+          const language = $('#course-language').val();
+          const isPublic = $('#course-public').is(':checked') ? 1 : 0;
+
+          try {
+              const res = await fetch('/api/create_course', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({name, language, is_public: isPublic})
+              });
+
+              if (!res.ok) {
+                  const error = await res.json();
+                  throw new Error(error.error || res.statusText);
+              }
+
+              // フォームをクリアして一覧を再読み込み
+              $('#course-name').val('');
+              $('#course-public').prop('checked', true);
+              await fetchCourses();
+
+          } catch (err) {
+              alert('追加に失敗しました: ' + err.message);
+          }
+      });
+
+  </script>
+
+
+</body>
+</html>

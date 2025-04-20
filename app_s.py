@@ -381,40 +381,41 @@ def generate_idiom_meaning(idiom):
 @app.route('/login', methods=['GET', 'POST'])
 def login_user():
     if request.method == 'POST':
-        user_id = request.form.get('user_id')
-        password = request.form.get('password')
+        user_id_input = request.form.get('user_id')
+        password_input = request.form.get('password')
 
-        if user_id and password:
-            # 1) DBから user_id のレコードを取得
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            sql = "SELECT password_hash, name FROM users WHERE user_id = ?"
-            cursor.execute(sql, user_id)
-            row = cursor.fetchone()
-            cursor.close()
-            conn.close()
+        if not user_id_input or not password_input:
+            return render_template('login.html', message='IDとパスワードを入れてください')
 
-            if row:
-                db_password_hash = row.password_hash
-                db_user_name = row.name
+        # DBからユーザーの数値ID・ハッシュ化パスワード・表示名を取得
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        sql = """
+            SELECT id, password_hash, name
+              FROM users
+             WHERE user_id = ?
+        """
+        cursor.execute(sql, user_id_input)
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
 
-                # 2) 入力されたパスワードがハッシュと一致するかチェック
-                if check_password(password, db_password_hash):
-                    # 3) 一致したらセッションに保存してログイン成功
-                    session['user_id'] = user_id
-                    session['user_name'] = db_user_name
-                    return redirect(url_for('home'))
-                else:
-                    # パスワード不一致
-                    return render_template('login.html', message='パスワードが違います')
-            else:
-                # user_idが見つからない
-                return render_template('login.html', message='ユーザーが存在しません')
+        if not row:
+            # user_id が存在しない
+            return render_template('login.html', message='ユーザーが存在しません')
 
-            # user_id または password が空の場合
-        return render_template('login.html', message='IDとパスワードを入れてください')
+        db_id, db_password_hash, db_user_name = row
 
-    # GET の場合はログイン画面を返す
+        # パスワード照合
+        if not check_password(password_input, db_password_hash):
+            return render_template('login.html', message='パスワードが違います')
+
+        # 認証成功 → セッションに数値IDと表示名を保存
+        session['user_id']   = db_id
+        session['user_name'] = db_user_name
+        return redirect(url_for('home'))
+
+    # GET リクエスト時はログイン画面を表示
     return render_template('login.html')
 
 
@@ -812,20 +813,27 @@ def assess_pronunciation():
 
 @app.route('/get_courses', methods=['GET'])
 def get_courses():
-    course_csv_path = os.path.join(RESOURCES_FOLDER, 'course.csv')
-    courses = []
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
 
-    try:
-        with open(course_csv_path, mode='r', encoding='utf-8') as file:
-            csv_reader = csv.DictReader(file)
-            for row in csv_reader:
-                if 'course' in row:  # Ensure 'course' column exists
-                    courses.append(row['course'])
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # 公開フラグ or 自分が作ったコースを取得
+    cursor.execute("""
+        SELECT id, name, language
+          FROM dbo.courses
+         WHERE is_public = 1
+            OR owner_user_id = ?
+        ORDER BY name
+    """, session['user_id'])
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
 
-        return jsonify({"courses": courses})
+    # フロントは文字列の配列しか見ていないので、name だけ返す
+    course_names = [row.name for row in rows]
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({"courses": course_names})
 
 
 @app.route('/generate_explanation', methods=['POST'])
@@ -1057,6 +1065,162 @@ def submit_practice():
         'ef': round(new_ef, 2),
         'next_review': next_review.isoformat()
     })
+from flask import abort
+
+def _current_owner_id(conn):
+    """
+    セッションの user_id(varchar) から users.id(int) を引いて返す。
+    これを各 API の最初に呼び出すことで、
+    owner_user_id として整合性を担保します。
+    """
+    user_str = session.get('user_id')
+    if not user_str:
+        abort(403)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM dbo.users WHERE user_id = ?", user_str)
+    row = cur.fetchone()
+    cur.close()
+    if not row:
+        abort(403)
+    return row.id
+
+# ───────────────────────────────────────────────────────
+# 管理画面ページを表示
+@app.route('/admin/courses')
+def admin_courses():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('admin_courses.html')
+
+
+# ───────────────────────────────────────────────────────
+# (1) 既存コース一覧取得
+@app.route('/api/get_courses_admin', methods=['GET'])
+def get_courses_admin():
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    conn = get_db_connection()
+    owner = _current_owner_id(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, language, is_public
+          FROM dbo.courses
+         WHERE owner_user_id = ?
+         ORDER BY id
+    """, owner)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    courses = []
+    for r in rows:
+        courses.append({
+            'id':         r.id,
+            'name':       r.name,
+            'language':   r.language,
+            'is_public':  bool(r.is_public),
+        })
+    return jsonify({'courses': courses})
+
+
+# ───────────────────────────────────────────────────────
+# (2) コース追加
+@app.route('/api/create_course', methods=['POST'])
+def create_course():
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    data = request.get_json() or {}
+    name       = data.get('name', '').strip()
+    language   = data.get('language', '').strip()
+    is_public  = 1 if data.get('is_public') else 0
+
+    if not name or not language:
+        return jsonify({'error': 'パラメータ不足'}), 400
+
+    conn = get_db_connection()
+    owner = _current_owner_id(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO dbo.courses (name, language, is_public, owner_user_id)
+        VALUES (?, ?, ?, ?)
+    """, name, language, is_public, owner)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({}), 201
+
+
+# ───────────────────────────────────────────────────────
+# (3) コース更新（公開／非公開切替など）
+@app.route('/api/update_course', methods=['POST'])
+def update_course():
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    data = request.get_json() or {}
+    course_id  = data.get('course_id', None)
+    name       = data.get('name', None)
+    language   = data.get('language', None)
+    is_public  = data.get('is_public', None)
+
+    if course_id is None or is_public is None:
+        return jsonify({'error': 'パラメータ不足'}), 400
+
+    conn = get_db_connection()
+    owner = _current_owner_id(conn)
+    cur = conn.cursor()
+
+    # 部分更新として、渡ってきたフィールドのみ更新
+    updates = []
+    params  = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name.strip())
+    if language is not None:
+        updates.append("language = ?")
+        params.append(language.strip())
+    # 公開フラグは必須
+    updates.append("is_public = ?")
+    params.append(1 if is_public else 0)
+
+    # 最後に WHERE 用
+    params.extend([course_id, owner])
+
+    sql = f"""
+        UPDATE dbo.courses
+           SET {', '.join(updates)}
+         WHERE id = ? AND owner_user_id = ?
+    """
+    cur.execute(sql, *params)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({}), 200
+
+
+# ───────────────────────────────────────────────────────
+# (4) コース削除
+@app.route('/api/delete_course/<int:course_id>', methods=['DELETE'])
+def delete_course(course_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    conn = get_db_connection()
+    owner = _current_owner_id(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM dbo.courses
+         WHERE id = ? AND owner_user_id = ?
+    """, course_id, owner)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({}), 200
 
 
 if __name__ == '__main__':

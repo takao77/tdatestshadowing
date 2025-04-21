@@ -1260,5 +1260,66 @@ def get_categories():
     return jsonify({'categories': cats})
 
 
+@app.route('/admin/vocab_upload')
+def vocab_upload_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('vocab_upload.html')
+
+
+# app_s.py などに追記
+@app.route('/api/upload_vocab', methods=['POST'])
+def upload_vocab():
+    if 'user_id' not in session:
+        return jsonify({'error': 'ログインしてください'}), 403
+
+    file = request.files.get('csv_file')
+    if not file or file.filename == '':
+        return jsonify({'error': 'CSV ファイルを選択してください'}), 400
+
+    import io, csv
+    # ★ UTF‑8 or UTF‑8‑BOM どちらも正しく読めるよう utf‑8‑sig にする
+    decoded = io.TextIOWrapper(file.stream, encoding='utf-8-sig', newline='')
+    reader  = csv.DictReader(decoded)
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+
+    # ★ 1) 先に courses テーブル全件を読んで set にしておく
+    cur.execute("SELECT name FROM dbo.courses")
+    valid_courses = {row.name.strip() for row in cur.fetchall()}
+
+    inserted, errors = 0, []
+
+    for lineno, row in enumerate(reader, start=2):   # 1 行目はヘッダ
+        course   = (row.get('course')   or '').strip()
+        sentence = (row.get('sentence') or '').strip()
+        word     = (row.get('word')     or '').strip()
+
+        # ★ 2) コースが存在しなければエラーログに記録してスキップ
+        if course not in valid_courses:
+            errors.append(f'{lineno} 行目: コース「{course}」は存在しません')
+            continue
+
+        if not (course and sentence):
+            errors.append(f'{lineno} 行目: 必須列が足りません')
+            continue
+
+        try:
+            cur.execute("""
+                INSERT INTO dbo.vocab_items (course, sentence, word)
+                VALUES (?, ?, ?)
+            """, course, sentence, word or None)
+            inserted += 1
+        except Exception as e:
+            # ★ DB 制約違反などのエラーを収集
+            errors.append(f'{lineno} 行目: {e}')
+
+    conn.commit()
+    cur.close(); conn.close()
+
+    return jsonify({'inserted': inserted, 'errors': errors})
+
+
 if __name__ == '__main__':
     app.run(debug=True)

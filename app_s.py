@@ -1091,25 +1091,39 @@ def get_courses_admin():
     # 3) DB からそのユーザー所有のコースを取得
     conn = get_db_connection()
     cur  = conn.cursor()
-    cur.execute("""
-        SELECT id, name, language, is_public
-          FROM dbo.courses
-         WHERE owner_user_id = ?
-         ORDER BY id
-    """, owner_user_id)
+    cur.execute(
+        """
+        SELECT
+            c.id,
+            c.name,
+            c.language,
+            c.is_public,
+            c.category_id,
+            COALESCE(cat.name, '') AS category_name
+        FROM dbo.courses AS c
+        LEFT JOIN dbo.categories AS cat
+               ON c.category_id = cat.id
+        WHERE c.owner_user_id = ?
+        ORDER BY c.id
+        """,
+        owner_user_id
+    )
     rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    # 4) JSON 用に成形
-    courses = []
-    for r in rows:
-        courses.append({
-            'id':        r.id,
-            'name':      r.name,
-            'language':  r.language,
-            'is_public': bool(r.is_public),
-        })
+    # ── 3) JSON 整形 ────────────────────────────────
+    courses = [
+        {
+            'id':            r.id,
+            'name':          r.name,
+            'language':      r.language,
+            'is_public':     bool(r.is_public),
+            'category_id':   r.category_id,
+            'category_name': r.category_name
+        }
+        for r in rows
+    ]
 
     return jsonify({'courses': courses})
 
@@ -1126,6 +1140,9 @@ def create_course():
     name      = data.get('name', '').strip()
     language  = data.get('language', '').strip()
     is_public = 1 if data.get('is_public') else 0
+    category_id = int(data.get('category_id', 0) or 0)  # 追加
+    if category_id is None:
+        return jsonify({'error': 'category_id が必要です'}), 400
 
     if not name or not language:
         return jsonify({'error': 'パラメータ不足'}), 400
@@ -1136,10 +1153,10 @@ def create_course():
 
     # INSERT と同時に新規作成された ID を取得
     cur.execute("""
-        INSERT INTO dbo.courses (name, language, is_public, owner_user_id)
+        INSERT INTO dbo.courses (name, language, is_public, owner_user_id, category_id)
         OUTPUT INSERTED.id
-        VALUES (?, ?, ?, ?)
-    """, name, language, is_public, owner_user_id)
+        VALUES (?, ?, ?, ?, ?)
+    """, name, language, is_public, owner_user_id, category_id)
 
     row = cur.fetchone()
     if not row:
@@ -1168,6 +1185,7 @@ def update_course():
     name      = data.get('name')
     language  = data.get('language')
     is_public = data.get('is_public')
+    category_id = int(data.get('category_id', 0) or 0)
 
     if course_id is None or is_public is None:
         return jsonify({'error': 'パラメータ不足'}), 400
@@ -1186,6 +1204,9 @@ def update_course():
     if language is not None:
         updates.append("language = ?")
         params.append(language.strip())
+    if category_id is not None:
+        updates.append("category_id = ?")
+        params.append(category_id)
     # 公開フラグは必須
     updates.append("is_public = ?")
     params.append(1 if is_public else 0)
@@ -1225,6 +1246,18 @@ def delete_course(course_id):
     conn.close()
 
     return jsonify({}), 200
+
+
+@app.route('/api/get_categories')
+def get_categories():
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("SELECT id, name FROM dbo.categories ORDER BY id")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    cats = [{'id': r.id, 'name': r.name} for r in rows]
+    return jsonify({'categories': cats})
 
 
 if __name__ == '__main__':

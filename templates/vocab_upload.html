@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>単語リスト一括アップロード</title>
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body{background:#f5f5f5;font-family:sans-serif;padding:40px}
+    .card{max-width:600px;margin:auto;background:#fff;padding:30px;
+          border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.1)}
+    input[type=file]{margin:20px 0}
+    .log{margin-top:20px;white-space:pre-wrap;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2><i class="fa-solid fa-upload"></i> CSV アップロード</h2>
+    <p>列順: <code>course,sentence,word</code>（UTF‑8）</p>
+
+    <input id="csv-file" type="file" accept=".csv">
+    <button id="upload-btn"><i class="fa-solid fa-cloud-arrow-up"></i> アップロード</button>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    $('#upload-btn').on('click', async () => {
+      const file = $('#csv-file')[0].files[0];
+      if (!file) { alert('CSV を選択してください'); return; }
+
+      const form = new FormData();
+      form.append('csv_file', file);
+
+      $('#log').text('Uploading…');
+
+      const res  = await fetch('/api/upload_vocab', {method:'POST', body:form});
+      const json = await res.json();
+      if (!res.ok) { $('#log').text('Error: '+JSON.stringify(json)); return; }
+
+      let logTxt = `✅ 追加 ${json.inserted} 件\n`;
+      if (json.errors.length){
+        logTxt += `⚠️ エラー ${json.errors.length} 件:\n`+json.errors.join('\n');
+      }
+      $('#log').text(logTxt);
+    });
+  </script>
+</body>
+</html>

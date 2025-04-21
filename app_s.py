@@ -1067,22 +1067,6 @@ def submit_practice():
     })
 from flask import abort
 
-def _current_owner_id(conn):
-    """
-    セッションの user_id(varchar) から users.id(int) を引いて返す。
-    これを各 API の最初に呼び出すことで、
-    owner_user_id として整合性を担保します。
-    """
-    user_str = session.get('user_id')
-    if not user_str:
-        abort(403)
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM dbo.users WHERE user_id = ?", user_str)
-    row = cur.fetchone()
-    cur.close()
-    if not row:
-        abort(403)
-    return row.id
 
 # ───────────────────────────────────────────────────────
 # 管理画面ページを表示
@@ -1097,31 +1081,38 @@ def admin_courses():
 # (1) 既存コース一覧取得
 @app.route('/api/get_courses_admin', methods=['GET'])
 def get_courses_admin():
+    # 1) ログインチェック
     if 'user_id' not in session:
         return jsonify({'error': 'ログインしてください'}), 403
 
+    # 2) セッションから user_id を直接取得（整数型）
+    owner_user_id = session['user_id']
+
+    # 3) DB からそのユーザー所有のコースを取得
     conn = get_db_connection()
-    owner = _current_owner_id(conn)
-    cur = conn.cursor()
+    cur  = conn.cursor()
     cur.execute("""
         SELECT id, name, language, is_public
           FROM dbo.courses
          WHERE owner_user_id = ?
          ORDER BY id
-    """, owner)
+    """, owner_user_id)
     rows = cur.fetchall()
     cur.close()
     conn.close()
 
+    # 4) JSON 用に成形
     courses = []
     for r in rows:
         courses.append({
-            'id':         r.id,
-            'name':       r.name,
-            'language':   r.language,
-            'is_public':  bool(r.is_public),
+            'id':        r.id,
+            'name':      r.name,
+            'language':  r.language,
+            'is_public': bool(r.is_public),
         })
+
     return jsonify({'courses': courses})
+
 
 
 # ───────────────────────────────────────────────────────
@@ -1131,29 +1122,41 @@ def create_course():
     if 'user_id' not in session:
         return jsonify({'error': 'ログインしてください'}), 403
 
-    data = request.get_json() or {}
-    name       = data.get('name', '').strip()
-    language   = data.get('language', '').strip()
-    is_public  = 1 if data.get('is_public') else 0
+    data      = request.get_json() or {}
+    name      = data.get('name', '').strip()
+    language  = data.get('language', '').strip()
+    is_public = 1 if data.get('is_public') else 0
 
     if not name or not language:
         return jsonify({'error': 'パラメータ不足'}), 400
 
+    owner_user_id = session['user_id']
     conn = get_db_connection()
-    owner = _current_owner_id(conn)
-    cur = conn.cursor()
+    cur  = conn.cursor()
+
+    # INSERT と同時に新規作成された ID を取得
     cur.execute("""
         INSERT INTO dbo.courses (name, language, is_public, owner_user_id)
+        OUTPUT INSERTED.id
         VALUES (?, ?, ?, ?)
-    """, name, language, is_public, owner)
+    """, name, language, is_public, owner_user_id)
+
+    row = cur.fetchone()
+    if not row:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({'error': 'コース作成に失敗しました'}), 500
+
+    new_id = row[0]  # OUTPUT INSERTED.id の結果
+
     conn.commit()
     cur.close()
     conn.close()
 
-    return jsonify({}), 201
+    return jsonify({'success': True, 'id': new_id}), 201
 
 
-# ───────────────────────────────────────────────────────
 # (3) コース更新（公開／非公開切替など）
 @app.route('/api/update_course', methods=['POST'])
 def update_course():
@@ -1161,17 +1164,18 @@ def update_course():
         return jsonify({'error': 'ログインしてください'}), 403
 
     data = request.get_json() or {}
-    course_id  = data.get('course_id', None)
-    name       = data.get('name', None)
-    language   = data.get('language', None)
-    is_public  = data.get('is_public', None)
+    course_id = data.get('course_id')
+    name      = data.get('name')
+    language  = data.get('language')
+    is_public = data.get('is_public')
 
     if course_id is None or is_public is None:
         return jsonify({'error': 'パラメータ不足'}), 400
 
+    owner_user_id = session['user_id']
+
     conn = get_db_connection()
-    owner = _current_owner_id(conn)
-    cur = conn.cursor()
+    cur  = conn.cursor()
 
     # 部分更新として、渡ってきたフィールドのみ更新
     updates = []
@@ -1186,8 +1190,8 @@ def update_course():
     updates.append("is_public = ?")
     params.append(1 if is_public else 0)
 
-    # 最後に WHERE 用
-    params.extend([course_id, owner])
+    # WHERE 用パラメータ（course_id, owner_user_id）
+    params.extend([course_id, owner_user_id])
 
     sql = f"""
         UPDATE dbo.courses
@@ -1202,20 +1206,20 @@ def update_course():
     return jsonify({}), 200
 
 
-# ───────────────────────────────────────────────────────
 # (4) コース削除
 @app.route('/api/delete_course/<int:course_id>', methods=['DELETE'])
 def delete_course(course_id):
     if 'user_id' not in session:
         return jsonify({'error': 'ログインしてください'}), 403
 
+    owner_user_id = session['user_id']
+
     conn = get_db_connection()
-    owner = _current_owner_id(conn)
-    cur = conn.cursor()
+    cur  = conn.cursor()
     cur.execute("""
         DELETE FROM dbo.courses
          WHERE id = ? AND owner_user_id = ?
-    """, course_id, owner)
+    """, course_id, owner_user_id)
     conn.commit()
     cur.close()
     conn.close()

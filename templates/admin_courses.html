@@ -63,6 +63,12 @@
       <option value="jp-kanji">日本語（漢字）</option>
     </select>
 
+    <!-- 🔽 新規: カテゴリー選択 -->
+    <label for="course-category">コースカテゴリー：</label>
+    <select id="course-category">
+      <!-- JS で動的に挿入 -->
+    </select>
+
       <label for="course-public" class="public-label">
           <input type="checkbox" id="course-public" checked>
           <span>公開する</span>
@@ -83,6 +89,7 @@
         <th>ID</th>
         <th>コース名</th>
         <th>言語</th>
+        <th>カテゴリー</th>
         <th>公開</th>
         <th>操作</th>
       </tr>
@@ -95,6 +102,22 @@
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script>
+      // ------------------ カテゴリー一覧の取得 ------------------
+      async function fetchCategories() {
+          try {
+              const res = await fetch('/api/get_categories');
+              const data = await res.json();
+              if (!Array.isArray(data.categories)) throw new Error('カテゴリーデータが取得できません');
+              const $sel = $('#course-category').empty();
+              data.categories.forEach(c => {
+                  $sel.append(`<option value="${c.id}">${c.name}</option>`);
+              });
+          } catch (err) {
+              console.error(err);
+              alert('カテゴリー一覧の取得に失敗しました');
+          }
+      }
+
       async function fetchCourses() {
           const res = await fetch('/api/get_courses_admin');
           const data = await res.json();
@@ -107,6 +130,7 @@
               <td>${course.id}</td>
               <td>${course.name}</td>
               <td>${course.language}</td>
+              <td>${course.category_name||''}</td>
               <td>
                 <i class="fas fa-toggle-${course.is_public ? 'on' : 'off'} toggle-btn ${pubClass}"
                    data-public="${course.is_public}"
@@ -136,6 +160,8 @@
                   if (!name) return;
                   const lang = prompt('新しい言語コードを入力してください (en, zh, jp-kanji)', $tr.find('td:nth-child(3)').text());
                   if (!lang) return;
+                  const cat=prompt('新しいカテゴリーIDを入力してください',currentCat);
+                  if(cat===null) return;
                   const pub = $tr.find('.toggle-btn').data('public') ? 1 : 0;
                   const res = await fetch('/api/update_course', {
                       method: 'POST',
@@ -154,19 +180,30 @@
               });
 
       // ページロード時に呼び出し
-      $(document).ready(fetchCourses);
+      $(document).ready(() => {
+          // ① 先にカテゴリ一覧を取得して <select id="course-category"> を埋める
+          fetchCategories()
+                  // ② 取得が終わったらコース一覧を描画
+                  .then(fetchCourses)
+                  // ③ どちらかで失敗したらエラーを表示
+                  .catch(err => {
+                      console.error(err);
+                      alert('初期データの読み込みに失敗しました');
+                  });
+      });
       // 追加フォーム送信ハンドラ（これがないと /api/create_course にリクエストされません）
       $('#add-course-form').on('submit', async function (e) {
           e.preventDefault();
           const name = $('#course-name').val().trim();
           const language = $('#course-language').val();
+          const categoryId = Number($('#course-category').val());
           const isPublic = $('#course-public').is(':checked') ? 1 : 0;
 
           try {
               const res = await fetch('/api/create_course', {
                   method: 'POST',
                   headers: {'Content-Type': 'application/json'},
-                  body: JSON.stringify({name, language, is_public: isPublic})
+                  body:JSON.stringify({name,language,category_id:Number(categoryId),is_public:isPublic})
               });
 
               if (!res.ok) {

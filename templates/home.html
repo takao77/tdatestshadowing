@@ -4,189 +4,208 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Select Your Course</title>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 
-    <!-- FontAwesome for Icons (v6.4.0) -->
-    <link
-            rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-            crossorigin="anonymous"
-            referrerpolicy="no-referrer"
-    />
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
 
     <style>
-        body {
-            background-color: #282828;
-            color: white;
-            font-family: 'Roboto', sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
+        :root{
+            --bg:#282828;
+            --card:#333333;
+            --card-border:#444444;
+            --blue:#3498db;
+            --blue-light:#5dade2;
+            --text:#ffffff;
         }
-        .container {
-            text-align: center;
+        *{box-sizing:border-box;}
+        body{
+            margin:0;
+            background:var(--bg);
+            color:var(--text);
+            font-family:'Raleway',sans-serif;
+            display:flex;
+            flex-direction:column;
+            min-height:100vh;
+            align-items:center;
+            justify-content:center;
         }
-        h1 {
-            margin-bottom: 20px;
+        h1{
+            font-weight:600;
+            margin:0 0 1.5rem;
+            text-align:center;
         }
-        .course-select {
-            margin-bottom: 20px;
+        /* grid wrapper */
+        .grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+            gap:1.5rem;
+            width:90%;
+            max-width:1000px;
         }
-        .btn {
-            background-color: #3498db;
-            border: none;
-            padding: 15px 25px;
-            border-radius: 50px;
-            cursor: pointer;
-            font-size: 16px;
-            color: white;
-            margin: 5px;
+        /* category card */
+        .card{
+            background:var(--card);
+            border:1px solid var(--card-border);
+            border-radius:12px;
+            padding:1rem 1.25rem 1.25rem;
+            box-shadow:0 4px 12px rgba(0,0,0,.25);
+            transition:transform .2s,box-shadow .2s;
         }
-        .btn:hover {
-            background-color: #2980b9;
+        .card:hover{
+            transform:translateY(-4px);
+            box-shadow:0 8px 20px rgba(0,0,0,.35);
         }
-        .icon {
-            font-size: 30px;
-            margin-top: 20px;
+        .card h2{
+            font-size:1.1rem;
+            margin:0 0 .75rem;
+            padding-left:.6rem;
+            border-left:4px solid var(--blue);
+            font-weight:600;
         }
+        /* course pill */
+        .pill{
+            display:inline-block;
+            margin:4px;
+            padding:6px 12px;
+            border-radius:16px;
+            background:#333;
+            color:#ddd;
+            font-size:.9rem;
+            cursor:pointer;
+            transition:background .2s,color .2s,box-shadow .2s;
+            user-select:none;
+        }
+        .pill:hover{background:var(--blue-light);color:#fff;}
+        .pill.active{
+            background:var(--blue);
+            color:#fff;
+            box-shadow:0 0 0 2px var(--blue-light) inset;
+        }
+        /* start button */
+        .start-btn{
+            margin-top:2rem;
+            background:var(--blue);
+            border:none;
+            color:#fff;
+            font-size:1rem;
+            padding:14px 28px;
+            border-radius:50px;
+            cursor:pointer;
+            display:flex;
+            align-items:center;
+            gap:.5rem;
+            opacity:0;
+            pointer-events:none;
+            transition:opacity .3s,background .2s;
+        }
+        .start-btn i{font-size:20px;}
+        .start-btn:hover{background:#2980b9;}
+        .start-btn.show{opacity:1;pointer-events:auto;}
 
-        .logout-btn {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background-color: #888; /* グレー */
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 4px;
-            text-decoration: none;
-            transition: background-color 0.3s;
+        /* bottom-left utility icons */
+        .bottom-left-icons{
+            position:absolute;bottom:20px;left:20px;display:flex;gap:16px;
         }
-
-        .logout-btn:hover {
-            background-color: #aaa;
+        .icon-btn{
+            font-size:2rem;color:var(--blue);background:none;border:none;cursor:pointer;
+            transition:transform .2s,color .3s;padding:0;
         }
-        /* head 内のスタイルに追加してください */
-        .bottom-left-icons {
-          position: absolute;
-          bottom: 20px;
-          left: 20px;
-          display: flex;
-          gap: 16px;
+        .icon-btn:hover{transform:scale(1.1);color:var(--blue-light);}
+        /* logout */
+        .logout-btn{
+            position:absolute;top:20px;right:20px;
+            background:#7f8c8d;color:#fff;border:none;padding:8px 12px;border-radius:4px;
+            cursor:pointer;transition:background .3s;
         }
-
-        .icon-btn {
-            font-size: 2rem;
-            color: #3498db;
-            background: none;
-            border: none;
-            cursor: pointer;
-            transition: transform 0.2s, color 0.3s;
-            padding: 0;
-        }
-
-        .icon-btn:hover {
-            transform: scale(1.1);
-            color: #5dade2;
-        }
+        .logout-btn:hover{background:#95a5a6;}
     </style>
 </head>
 <body>
-<!-- ログアウトボタン -->
-<a href="/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
 
-<div class="container">
-    <h1>Select Your Course</h1>
+    <button class="logout-btn" onclick="location.href='/logout'"><i class="fas fa-sign-out-alt"></i> Logout</button>
 
-    <!-- Course Dropdown -->
-    <div class="course-select">
-        <label for="course">Choose a course:</label>
-        <select id="course">
-            <!-- Options will be dynamically populated -->
-        </select>
-    </div>
-
-    <!-- Cool Practice Icon Button -->
-    <button class="btn" onclick="startPractice()">
-        <span class="icon">🎧</span> Start Practice
-    </button>
+    <main style="text-align:center;width:100%">
+        <h1>Select Your Course</h1>
+        <div class="grid" id="course-grid"><!-- JS inject --></div>
+        <button id="start-btn" class="start-btn"><i class="fas fa-headphones"></i> Start Practice</button>
+    </main>
 
     <!-- 左下アイコン群 -->
     <div class="bottom-left-icons">
-        <!-- コース管理 -->
-        <button class="icon-btn" title="コース管理" onclick="location.href='/admin/courses'">
-            <i class="fas fa-cog"></i>
-        </button>
-        <!-- ★ 一括アップロード (CSV)  ← これを追加 -->
-        <button class="icon-btn" title="CSV アップロード" onclick="location.href='/admin/vocab_upload'">
-            <i class="fas fa-file-csv"></i>
-        </button>
-        <!-- 履歴ページ -->
-        <button class="icon-btn" title="履歴" onclick="goToHistory()">
-            <i class="fas fa-history"></i>
-        </button>
+        <button class="icon-btn" title="コース管理" onclick="location.href='/admin/courses'"><i class="fas fa-cog"></i></button>
+        <button class="icon-btn" title="CSV アップロード" onclick="location.href='/admin/vocab_upload'"><i class="fas fa-file-csv"></i></button>
+        <button class="icon-btn" title="履歴" onclick="goToHistory()"><i class="fas fa-history"></i></button>
     </div>
 
-</div>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        let selectedCourse = '';
 
-<script>
-    // Populate the course dropdown from data retrieved from the server
-    document.addEventListener('DOMContentLoaded', () => {
-        fetch('/get_courses')
-            .then(response => response.json())
-            .then(data => {
-                const courseSelect = document.getElementById('course');
-                if (data.courses) {
-                    data.courses.forEach(course => {
-                        const option = document.createElement('option');
-                        option.value = course;
-                        option.textContent = course;
-                        courseSelect.appendChild(option);
-                    });
-                } else {
-                    console.error('No courses found');
+        // ↓ groupBy helper — 先頭のアンダースコアまでをカテゴリーとみなす
+        // カテゴリー名が API から来ることを想定して groupBy
+        // コース配列 [{name,category,overview}, …] をカテゴリー単位にまとめる
+        function groupByCategory(list){
+            const map = {};
+            list.forEach(item=>{
+                let courseObj;
+                if(typeof item === 'string'){
+                    courseObj = {name:item, overview:''};
+                    courseObj.category = item.includes('_') ? item.split('_')[0] : item;
+                }else{
+                    courseObj = item;
+                    if(!courseObj.category){
+                        courseObj.category = courseObj.name.includes('_')
+                          ? courseObj.name.split('_')[0] : courseObj.name;
+                    }
                 }
-            })
-            .catch(error => console.error('Error fetching courses:', error));
-    });
-
-    // Start practice by redirecting to the shadowing page with the selected course
-    function startPractice() {
-        const selectedCourse = document.getElementById('course').value;
-        if (selectedCourse) {
-            window.location.href = `/shadowing?course=${encodeURIComponent(selectedCourse)}`;
-        } else {
-            alert("Please select a course.");
+                if(!map[courseObj.category]) map[courseObj.category] = [];
+                map[courseObj.category].push(courseObj);
+            });
+            return map;
         }
 
-    }
-
-    // 新規追加: 履歴ページへ移動
-    function goToHistory() {
-        window.location.href = "/history";
-    }
-
-    function goToReview() {
-        const c = document.getElementById('course').value;
-        if (!c) {
-            alert('Please select a course.');
-            return;
+        function renderCourses(data){
+            const grid=$('#course-grid').empty();
+            const groups=groupByCategory(data);
+            Object.entries(groups).forEach(([cat,courses])=>{
+                const $card=$('<div>',{class:'card'});
+                $card.append(`<h2><i class="fa-solid fa-star" style="color:${getComputedStyle(document.documentElement).getPropertyValue('--blue-light')}"></i> ${cat} <span style="font-size:.8rem;opacity:.7">(${courses.length})</span></h2>`);
+                courses.forEach(obj=>{
+                const $pill = $('<span>', {
+                    class: 'pill',
+                    text: obj.name,
+                    title: obj.overview || obj.name   // ツールチップに概要
+                });
+                $pill.on('click', function(){
+                    $('.pill').removeClass('active');
+                    $(this).addClass('active');
+                    selectedCourse = obj.name;
+                    $('#start-btn').addClass('show');
+                });
+                $card.append($pill);
+            });
+            grid.append($card);
+            });
         }
-        window.location.href = `/review?course=${encodeURIComponent(c)}`;
-    }
 
-    function goToTest() {
-        const c = document.getElementById('course').value;
-        if (!c) {
-            alert('Please select a course.');
-            return;
+        function init(){
+            fetch('/get_courses')
+              .then(resp=>resp.json())
+              .then(json=>renderCourses(json.courses || []))
+              .catch(err=>console.error('courses load error',err));
         }
-        window.location.href = `/test?course=${encodeURIComponent(c)}`;
-    }
 
-</script>
+        $('#start-btn').on('click',()=>{
+            if(!selectedCourse){alert('コースを選択してください');return;}
+            location.href='/shadowing?course='+encodeURIComponent(selectedCourse);
+        });
 
+        function goToHistory(){location.href='/history';}
+
+        $(init);
+    </script>
 </body>
 </html>

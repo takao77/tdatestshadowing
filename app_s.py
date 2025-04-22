@@ -817,23 +817,41 @@ def get_courses():
         return jsonify({'error': 'ログインしてください'}), 403
 
     conn = get_db_connection()
-    cursor = conn.cursor()
-    # 公開フラグ or 自分が作ったコースを取得
-    cursor.execute("""
-        SELECT id, name, language
-          FROM dbo.courses
-         WHERE is_public = 1
-            OR owner_user_id = ?
-        ORDER BY name
+    cur  = conn.cursor()
+
+    # courses と categories を JOIN し overview も取得
+    cur.execute("""
+        SELECT
+            c.name               AS course_name,
+            ISNULL(cat.name,
+                   CASE
+                        WHEN CHARINDEX('_', c.name) > 0
+                             THEN LEFT(c.name, CHARINDEX('_', c.name) - 1)
+                        ELSE c.name
+                   END)           AS category_name,
+            ISNULL(c.overview, '') AS overview
+        FROM dbo.courses AS c
+        LEFT JOIN dbo.categories AS cat
+               ON c.category_id = cat.id
+        WHERE c.is_public = 1
+           OR c.owner_user_id = ?
+        ORDER BY category_name, c.id ASC
     """, session['user_id'])
-    rows = cursor.fetchall()
-    cursor.close()
+
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
-    # フロントは文字列の配列しか見ていないので、name だけ返す
-    course_names = [row.name for row in rows]
+    courses = [
+        {
+            "name":      r.course_name,
+            "category":  r.category_name,
+            "overview":  r.overview         # ← 追加
+        }
+        for r in rows
+    ]
 
-    return jsonify({"courses": course_names})
+    return jsonify({"courses": courses})
 
 
 @app.route('/generate_explanation', methods=['POST'])

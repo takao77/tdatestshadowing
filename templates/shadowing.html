@@ -276,13 +276,30 @@
       <div id="assessment-result"></div>
     </div>
 
-    <!-- 新: 自己評価ボタン -->
-    <div class="rating-container" style="margin-top:30px; display:flex; justify-content:center; gap:10px;">
-      <button class="rating-btn" data-score="1">1</button>
-      <button class="rating-btn" data-score="2">2</button>
-      <button class="rating-btn" data-score="3">3</button>
-      <button class="rating-btn" data-score="4">4</button>
-      <button class="rating-btn" data-score="5">5</button>
+    <p id="rating-guide"
+     style="text-align:center; margin-top:25px; font-size:1rem; opacity:.8; display:none;">
+      Please rate your confidence for this item.<br>
+      この問題の習得度を自己評価してください。
+    </p>
+
+    <!-- 自己評価ボタン -->
+    <div class="rating-container"
+       style="margin-top:10px; display:flex; justify-content:center; gap:10px;">
+      <button class="rating-btn" data-score="1"
+              title="I barely remember this. / ほとんど覚えていない">1
+      </button>
+      <button class="rating-btn" data-score="2"
+              title="I remember parts, but make many mistakes. / まだ間違いが多い">2
+      </button>
+      <button class="rating-btn" data-score="3"
+              title="I can recall it with some effort. / 思い出すのに少し時間がかかる">3
+      </button>
+      <button class="rating-btn" data-score="4"
+              title="I recall it easily, with minor hesitation. / ほぼ覚えた">4
+      </button>
+      <button class="rating-btn" data-score="5"
+              title="I've completely mastered this! / 完璧に覚えた">5
+      </button>
     </div>
 
   </div>
@@ -299,6 +316,17 @@
     let currentWord = null;
     let currentSentence = null;
     let currentEF         = null;
+
+    /* === 1) まずグローバル関数を宣言 ========================= */
+    function enterShadowMode() {
+        $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').show();
+        $('#dictation-container').hide();
+    }
+
+    function enterDictationMode() {
+        $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').hide();
+        $('#dictation-container').show();
+    }
 
     $(document).ready(async function() {
         const course = "{{ course }}";  // Get the course passed from the backend
@@ -350,29 +378,10 @@
                 $('#dictation-input').val('');
                 $('#dictation-feedback').text('');
                 $('#dictation-next').hide();
-            fetchSentence().then(() => {
-                // EF によってシャドーイング or ディクテーションに切り替え
-                if (currentEF >= 3) {
-                    enterDictationMode();
-                    // ← 古い audio をクリア
-                    $('#dictation-audio').attr('src', '').hide();
-                } else {
-                    enterShadowMode();
-                }
-            });
-        }
 
-        // --- (D) UI 切替用関数 ---
-        // シャドーイング用のボタン・音声再生UIを表示／ディクテーションUIを隠す
-        function enterShadowMode() {
-            $('#dynamic-sentence, #practice-btn, #practice-audio, .rating-container').show();
-            $('#dictation-container').hide();
-        }
+                $('#dictation-audio').attr('src', '').hide();
 
-        // ディクテーション用UIを表示／シャドーイングUIを隠す
-        function enterDictationMode() {
-            $('#dynamic-sentence, #practice-btn, #practice-audio, .rating-container').hide();
-            $('#dictation-container').show();
+                fetchSentence();
         }
 
         // ── (E) Dictation: 「確認」ボタンのクリックハンドラ ──
@@ -682,27 +691,32 @@
 
     // Function to switch between tabs
     function showTab(event, tabName) {
-      document.querySelectorAll('.tab-content').forEach(function(tab) {
-        tab.classList.remove('active');
-      });
-      document.getElementById(tabName).classList.add('active');
-      document.querySelectorAll('.tab button').forEach(function(button) {
-        button.classList.remove('active');
-      });
-      event.currentTarget.classList.add('active');
-// ★ もしexplanationタブのみでwordを表示したいなら
+
+        /* ① すべてのタブコンテンツを非アクティブに */
+        document.querySelectorAll('.tab-content')
+                .forEach(tab => tab.classList.remove('active'));
+
+        /* ② クリックしたタブだけアクティブに */
+        document.getElementById(tabName).classList.add('active');
+
+        /* ③ ボタンのハイライト切替 */
+        document.querySelectorAll('.tab button')
+                .forEach(btn => btn.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+
+        /* ④ explanation タブだけ単語を表示 */
         if (tabName === 'explanation') {
-            // 表示:
-            $('#explanation-word-wrap').show();  // あるいはCSSでdisplayをコントロール
+            $('#explanation-word-wrap').show();
             $('#explanation-word').text(currentWord);
         } else {
-            // 他のタブでは隠す
             $('#explanation-word-wrap').hide();
         }
+
+        /* ⑤ practice タブだけ自己評価ボタン＋ガイド文を表示 */
         if (tabName === 'practice') {
-          $('.rating-container').show();
+            $('.rating-container, #rating-guide').show();
         } else {
-          $('.rating-container').hide();
+            $('.rating-container, #rating-guide').hide();
         }
     }
 
@@ -722,9 +736,15 @@
                     currentVocabId = item.vocab_id;
                     currentSentence = item.sentence;
                     currentWord = item.word;
+                    currentEF = item.ef ?? 2.0;
 
                     // 画面に反映
                     $('#dynamic-sentence').text(currentSentence);
+
+                    // ★ EF に応じてモードを切替
+                    if (currentEF >= 3) enterDictationMode();
+                    else enterShadowMode();
+
                     $('.rating-container').show();
                 })
                 .catch(err => {

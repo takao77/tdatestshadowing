@@ -20,7 +20,9 @@
 
 <div class="container text-center">
   <div class="mx-auto box">
-      {% if '成功' in msg %}
+
+      {# ＝＝ 成功 / 失敗 アイコン ＝＝ #}
+      {% if success %}
         <i class="fas fa-check-circle text-success icon-lg mb-3"></i>
       {% else %}
         <i class="fas fa-times-circle text-danger  icon-lg mb-3"></i>
@@ -28,7 +30,30 @@
 
       <p>{{ msg }}</p>
 
-      <a href="/login" class="btn btn-primary btn-block link-btn">
+      {# ＝＝ 未認証（リンク失効など）の場合だけ「メール再送」ボタンを表示 ＝＝ #}
+      {% if not success %}
+        <form id="resend-form" action="/resend_verification" method="POST" class="mt-3">
+          <input type="hidden" name="email" value="{{ email }}">
+          <button type="submit" class="btn btn-primary btn-block">
+            <i class="fas fa-envelope"></i> メールを再送する / Resend Verification Mail
+          </button>
+        </form>
+
+        <div id="resend-msg" class="mt-2" style="font-size:0.9rem"></div>
+
+        <script>
+          // Ajax でメール再送（ページリロードしなくても済む）
+          document.getElementById('resend-form').addEventListener('submit', async e => {
+              e.preventDefault();
+              const form = new FormData(e.target);
+              const res  = await fetch('/resend_verification', {method:'POST', body:form});
+              const json = await res.json();
+              document.getElementById('resend-msg').textContent = json.msg;
+          });
+        </script>
+      {% endif %}
+
+      <a href="/login" class="btn btn-outline-light btn-block link-btn">
         <i class="fas fa-sign-in-alt"></i> ログインへ
       </a>
   </div>

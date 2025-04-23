@@ -46,10 +46,30 @@
       <script>
           document.getElementById('resend-form').addEventListener('submit', async e => {
               e.preventDefault();
+
               const form = new FormData(e.target);
-              const r = await fetch('/resend_verification', {method: 'POST', body: form});
-              const j = await r.json();
-              document.getElementById('resend-msg').textContent = j.msg;
+              const $msg = document.getElementById('resend-msg');
+              $msg.textContent = 'Sending…';
+
+              try {
+                  const res = await fetch('/resend_verification', {
+                      method: 'POST',
+                      body: form
+                  });
+
+                  /* ──★ ここが追加した“JSON以外”の判定 ── */
+                  if (!res.ok) {                       // ← 404, 500 など
+                      const txt = await res.text();    // HTML だったら text で受ける
+                      console.error('HTTP', res.status, txt.slice(0, 200));
+                      throw new Error('Server error: ' + res.status);
+                  }
+
+                  const json = await res.json();       // 200 のときだけ JSON パース
+                  $msg.textContent = json.msg;
+              } catch (err) {
+                  console.error(err);
+                  $msg.textContent = '通信エラー / Failed to resend';
+              }
           });
       </script>
       {% endif %}

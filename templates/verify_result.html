@@ -30,6 +30,11 @@
 
       <p>{{ msg }}</p>
 
+    <!-- ↓ここがデバッグ表示。必要がなくなったら削除してください -->
+    <p style="font-size:0.8rem;color:#aaa;">
+    debug - updated_rows = {{ updated_rows }}
+    </p>
+
       {# ＝＝ 未認証（リンク失効など）の場合だけ「メール再送」ボタンを表示 ＝＝ #}
       {% if not success %}
       <form id="resend-form" action="/resend_verification" method="POST" class="mt-3">

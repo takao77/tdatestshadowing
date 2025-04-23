@@ -971,44 +971,27 @@ def get_due_vocab():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 最新の review_time と next_review を取り出しつつ、
-    # 直近 20 分以内にレビューされたものは除外し、
-    # next_review の未来／過去を問わず全件を取得
-    cursor.execute(
-        """
-        SELECT 
-          vi.id       AS vocab_id, 
-          vi.sentence, 
-          vi.word
-        FROM dbo.vocab_items vi
-        LEFT JOIN (
-          SELECT vocab_id, next_review, review_time
-          FROM (
-            SELECT 
-              vocab_id,
-              next_review,
-              review_time,
-              ROW_NUMBER() OVER (
-                PARTITION BY vocab_id 
-                ORDER BY review_time DESC
-              ) AS rn
-            FROM dbo.vocab_reviews
-            WHERE user_id = ?
-          ) t
-          WHERE t.rn = 1
-        ) vr 
-          ON vi.id = vr.vocab_id
-        WHERE 
-          vi.course = ?
-          AND (
-            vr.review_time IS NULL
-            OR vr.review_time <= DATEADD(minute, -10, GETUTCDATE())
-          )
-        ORDER BY 
-          ISNULL(vr.next_review, '1900-01-01') ASC
-        """,
-        user_id, course
-    )
+    cursor.execute("""
+            SELECT
+                vi.id        AS vocab_id,
+                vi.sentence,
+                vi.word,
+                ISNULL(vr.ef, 2.5) AS ef            -- ★ 追加: 最新 EF が無ければ 2.5
+            FROM dbo.vocab_items  vi
+            LEFT JOIN (
+                SELECT vocab_id, ef, next_review, review_time,
+                       ROW_NUMBER() OVER (PARTITION BY vocab_id
+                                          ORDER BY review_time DESC) AS rn
+                FROM dbo.vocab_reviews
+                WHERE user_id = ?
+            ) vr ON vi.id = vr.vocab_id AND vr.rn = 1           -- ★ ef を取得
+            WHERE vi.course = ?
+              AND (
+                    vr.review_time IS NULL
+                 OR vr.review_time <= DATEADD(minute,-10,GETUTCDATE())
+              )
+            ORDER BY ISNULL(vr.next_review,'1900-01-01') ASC
+        """, user_id, course)
 
     rows = cursor.fetchall()
     cursor.close()
@@ -1017,7 +1000,8 @@ def get_due_vocab():
     due = [{
         'vocab_id': row.vocab_id,
         'sentence': row.sentence,
-        'word':     row.word
+        'word':     row.word,
+        'ef': float(row.ef)
     } for row in rows]
 
     return jsonify(due)

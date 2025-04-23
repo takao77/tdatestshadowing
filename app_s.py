@@ -1413,8 +1413,7 @@ def verify_email():
         cur.execute("""
             SELECT 1
               FROM dbo.users
-             WHERE verify_token = ?
-               AND is_email_verified = 1
+             WHERE is_email_verified = 1
         """, token)
         row = cur.fetchone()
         if row:

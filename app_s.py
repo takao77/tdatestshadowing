@@ -1390,6 +1390,7 @@ TDA App'''
     return render_template('register_done.html')
 
 # ────────────────────── メール確認リンク ──────────────────────
+# --- メール確認リンク ---------------------------
 @app.route('/verify_email')
 def verify_email():
     token = request.args.get('token', '').strip()
@@ -1401,10 +1402,11 @@ def verify_email():
             msg='リンクが無効、または期限切れです。'
         )
 
-    conn = get_db_connection(); cur = conn.cursor()
+    conn = get_db_connection()
+    cur  = conn.cursor()
 
-    # token が一致する未認証ユーザーを更新
-    result = cur.execute("""
+    # 未認証行を更新してみる
+    cur.execute("""
         UPDATE dbo.users
            SET is_email_verified = 1,
                verify_token      = NULL
@@ -1412,21 +1414,22 @@ def verify_email():
            AND is_email_verified = 0
     """, token)
 
-    updated = result.rowcount        # 1行更新なら成功
-    conn.commit(); cur.close(); conn.close()
+    updated_rows = cur.rowcount        # ← 1 なら成功
+    conn.commit()
+    cur.close(); conn.close()
 
-    if updated:
-        msg = 'メールアドレスの確認が完了しました！'
-        success = True
+    if updated_rows == 1:
+        return render_template(
+            'verify_result.html',
+            success=True,
+            msg='メールアドレスの確認が完了しました！'
+        )
     else:
-        msg = 'リンクが無効、または期限切れです。'
-        success = False
-
-    return render_template(
-        'verify_result.html',
-        success=success,
-        msg=msg
-    )
+        return render_template(
+            'verify_result.html',
+            success=False,
+            msg='リンクが無効、または期限切れです。'
+        )
 
 
 # ─────────────────────────────────────────────

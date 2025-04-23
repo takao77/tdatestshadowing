@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registration Complete</title>
+
+  <!-- Bootstrap / FontAwesome -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+
+  <style>
+    body{background:#000;color:#fff;font-family:'Roboto',sans-serif}
+    .box{background:rgba(0,0,0,.75);padding:30px;border-radius:12px;width:340px;max-width:90%;margin-top:60px}
+    .home-link{position:absolute;top:15px;left:20px;color:#fff;font-size:28px;text-decoration:none;transition:color .3s}
+    .home-link:hover{color:#3498db}
+  </style>
+</head>
+<body>
+
+<a class="home-link" href="/login" title="ログインへ"><i class="fas fa-home"></i></a>
+
+<div class="container text-center">
+  <div class="mx-auto box">
+      <h3 class="mb-4"><i class="fas fa-check-circle text-success"></i> 登録完了</h3>
+
+      <p class="text-left">
+        ご登録ありがとうございます。確認メールを <strong>{{ email }}</strong> に送信しました。<br>
+        メール内のリンクをクリックして<br>アカウントを有効化してください。
+      </p>
+
+      <a href="/login" class="btn btn-primary btn-block mt-3">
+        <i class="fas fa-sign-in-alt"></i> ログイン画面へ
+      </a>
+  </div>
+</div>
+
+</body>
+</html>

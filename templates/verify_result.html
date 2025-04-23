@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email Verification</title>
+
+  <!-- Bootstrap / FontAwesome -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+
+  <style>
+    body{background:#000;color:#fff;font-family:'Roboto',sans-serif}
+    .box{background:rgba(0,0,0,.8);padding:30px;border-radius:12px;width:340px;max-width:90%;margin-top:60px}
+    .icon-lg{font-size:48px}
+    .link-btn{margin-top:25px}
+  </style>
+</head>
+<body>
+
+<div class="container text-center">
+  <div class="mx-auto box">
+      {% if '成功' in msg %}
+        <i class="fas fa-check-circle text-success icon-lg mb-3"></i>
+      {% else %}
+        <i class="fas fa-times-circle text-danger  icon-lg mb-3"></i>
+      {% endif %}
+
+      <p>{{ msg }}</p>
+
+      <a href="/login" class="btn btn-primary btn-block link-btn">
+        <i class="fas fa-sign-in-alt"></i> ログインへ
+      </a>
+  </div>
+</div>
+
+</body>
+</html>

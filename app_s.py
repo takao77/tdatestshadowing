@@ -17,6 +17,8 @@ import json
 import difflib
 import string
 import math
+from flask_mail import Mail, Message
+import secrets
 
 
 # Load environment variables from .env file
@@ -110,6 +112,25 @@ USER_AUDIO_PATH = os.path.join(os.path.dirname(__file__), 'user_audio')
 # Ensure the 'user_audio' folder exists
 os.makedirs(USER_AUDIO_PATH, exist_ok=True)
 
+
+# ── メール設定 ─────────────────────────────────────────
+app.config.update(
+    MAIL_SERVER   = os.getenv('SMTP_HOST', 'smtp.sendgrid.net'),
+    MAIL_PORT     = 587,
+    MAIL_USE_TLS  = True,
+    MAIL_USERNAME = os.getenv('SMTP_USER', 'apikey'),
+    MAIL_PASSWORD = os.getenv('SG_API_KEY'),          # ★ 環境変数名は自由
+    MAIL_DEFAULT_SENDER = (
+        'TDA App',
+        os.getenv('SMTP_FROM')
+    )
+)
+mail = Mail(app)
+VERIFY_BASE_URL = os.getenv(
+    'VERIFY_BASE_URL',
+    'https://tdatestshadowing.azurewebsites.net/verify_email'
+)
+# ────────────────────────────────────────────────
 
 def get_db_connection():
     """
@@ -384,38 +405,28 @@ def login_user():
         user_id_input = request.form.get('user_id')
         password_input = request.form.get('password')
 
-        if not user_id_input or not password_input:
-            return render_template('login.html', message='IDとパスワードを入れてください')
-
-        # DBからユーザーの数値ID・ハッシュ化パスワード・表示名を取得
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        sql = """
-            SELECT id, password_hash, name
-              FROM users
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("""
+            SELECT id, password_hash, name, is_email_verified
+              FROM dbo.users
              WHERE user_id = ?
-        """
-        cursor.execute(sql, user_id_input)
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        """, user_id_input)
+        row = cur.fetchone(); cur.close(); conn.close()
 
         if not row:
-            # user_id が存在しない
             return render_template('login.html', message='ユーザーが存在しません')
 
-        db_id, db_password_hash, db_user_name = row
+        db_id, db_pw_hash, db_name, verified = row
+        if not verified:
+            return render_template('login.html', message='メール認証を完了してください')
 
-        # パスワード照合
-        if not check_password(password_input, db_password_hash):
+        if not check_password(password_input, db_pw_hash):
             return render_template('login.html', message='パスワードが違います')
 
-        # 認証成功 → セッションに数値IDと表示名を保存
-        session['user_id']   = db_id
-        session['user_name'] = db_user_name
+        session['user_id'] = db_id
+        session['user_name'] = db_name
         return redirect(url_for('home'))
 
-    # GET リクエスト時はログイン画面を表示
     return render_template('login.html')
 
 
@@ -1321,6 +1332,80 @@ def upload_vocab():
     cur.close(); conn.close()
 
     return jsonify({'inserted': inserted, 'errors': errors})
+
+
+# ────────────────────── ユーザー登録 ──────────────────────
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'GET':
+        return render_template('register.html')
+
+    # POST: フォーム値取得
+    user_id = request.form.get('user_id', '').strip()
+    name    = request.form.get('name', '').strip()
+    email   = request.form.get('email', '').strip()
+    pw      = request.form.get('password')
+
+    # 簡易バリデーション
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return render_template('register.html', msg='無効なメールアドレスです')
+
+    # パスワードハッシュ
+    pw_hash = hash_password(pw)
+
+    # メール確認用トークン
+    token = secrets.token_urlsafe(32)
+
+    # DB へ仮登録
+    conn, cur = get_db_connection(), None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO dbo.users
+                (user_id, name, password_hash, email,
+                 is_email_verified, verify_token)
+            VALUES (?, ?, ?, ?, 0, ?)
+        """, user_id, name, pw_hash, email, token)
+        conn.commit()
+    except pyodbc.IntegrityError:
+        return render_template('register.html', msg='User ID または Email が既に存在します')
+    finally:
+        if cur: cur.close()
+        conn.close()
+
+    # 確認メール送信
+    verify_link = f'{VERIFY_BASE_URL}?token={token}'
+    body = f'''{name} さん
+
+以下のリンクをクリックしてメールアドレスを確認してください。
+
+{verify_link}
+
+TDA App'''
+    mail.send(Message(
+        subject='【TDA】メールアドレス確認のお願い',
+        recipients=[email],
+        body=body
+    ))
+    return render_template('register_done.html')
+
+# ────────────────────── メール確認リンク ──────────────────────
+@app.route('/verify_email')
+def verify_email():
+    token = request.args.get('token', '')
+    conn  = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        UPDATE dbo.users
+           SET is_email_verified = 1,
+               verify_token      = NULL
+         WHERE verify_token = ?
+    """, token)
+    updated = cur.rowcount
+    conn.commit(); cur.close(); conn.close()
+
+    msg = ('認証に成功しました。ログインできます。' if updated
+           else 'リンクが無効、または期限切れです。')
+    return render_template('verify_result.html', msg=msg)
 
 
 if __name__ == '__main__':

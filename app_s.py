@@ -1395,32 +1395,36 @@ TDA App'''
 def verify_email():
     token = request.args.get('token', '').strip()
 
-    conn = get_db_connection()
-    cur  = conn.cursor()
+    if not token:
+        return render_template(
+            'verify_result.html',
+            success=False,
+            msg='リンクが無効、または期限切れです。',
+            updated_rows=0
+        )
 
-    # ① まだ未認証の行だけを UPDATE
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # ① token が一致する行を認証済みにする（token は消さない）
     cur.execute("""
         UPDATE dbo.users
-           SET is_email_verified = 1,
-               verify_token      = NULL
+           SET is_email_verified = 1
          WHERE verify_token      = ?
-           AND is_email_verified = 0
     """, token)
-    updated = cur.rowcount          # 1 行更新ならこれで完了
+    updated = cur.rowcount          # 1 行なら今回初めて認証
 
-    # ② ここが追加――Gateway が先に認証したケースを救済
+    # ② 既に認証済みだったか（is_email_verified=1）が残っているか判定
     if updated == 0:
         cur.execute("""
             SELECT 1
               FROM dbo.users
-             WHERE is_email_verified = 1
+             WHERE verify_token      = ?
+               AND is_email_verified = 1
         """, token)
-        row = cur.fetchone()
-        if row:
+        if cur.fetchone():
             updated = 1             # すでに認証済みとみなす
 
-    conn.commit()
-    cur.close(); conn.close()
+    conn.commit(); cur.close(); conn.close()
 
     success = (updated == 1)
     msg = 'メールアドレスの確認が完了しました！' if success \
@@ -1430,9 +1434,8 @@ def verify_email():
         'verify_result.html',
         success=success,
         msg=msg,
-        updated_rows=updated        # ← デバッグ用に残すなら
+        updated_rows=updated   # デバッグ表示用
     )
-
 
 
 # ─────────────────────────────────────────────

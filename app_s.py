@@ -1393,7 +1393,7 @@ TDA App'''
 # --- メール確認リンク ---------------------------
 @app.route('/verify_email')
 def verify_email():
-    # token = request.args.get('token', '').strip()
+    token = request.args.get('token', '').strip()
     #
     # if not token:
     #     return render_template(

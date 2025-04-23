@@ -1408,5 +1408,54 @@ def verify_email():
     return render_template('verify_result.html', msg=msg)
 
 
+# ─────────────────────────────────────────────
+# 失効・未認証時にメールを再送するエンドポイント
+# ─────────────────────────────────────────────
+@app.route('/resend_verification', methods=['POST'])
+def resend_verification():
+    email = request.form.get('email', '').strip().lower()
+
+    if not email:
+        return jsonify({'ok': False, 'msg': 'Email is required'}), 400
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    # 未認証ユーザーを取得
+    cur.execute("""
+        SELECT id, user_id, name 
+          FROM dbo.users 
+         WHERE email = ? AND is_email_verified = 0
+    """, email)
+    row = cur.fetchone()
+
+    if not row:
+        cur.close(); conn.close()
+        return jsonify({'ok': False, 'msg': 'User not found or already verified'}), 404
+
+    user_id, user_name = row.user_id, row.name
+    new_token = secrets.token_urlsafe(32)
+
+    # トークン更新
+    cur.execute("""
+        UPDATE dbo.users
+           SET verify_token = ?
+         WHERE id = ?
+    """, new_token, row.id)
+    conn.commit()
+    cur.close(); conn.close()
+
+    # メール送信
+    verify_url = f"{VERIFY_BASE_URL}?token={new_token}"
+    mail.send(Message(
+        subject="TDA App – Verify your email",
+        recipients=[email],
+        html=render_template('mail_verify.html',
+                             user_name=user_name,
+                             verify_url=verify_url)
+    ))
+
+    return jsonify({'ok': True, 'msg': 'Verification mail sent'})
+
+
 if __name__ == '__main__':
     app.run(debug=True)

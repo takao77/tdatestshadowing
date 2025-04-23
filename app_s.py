@@ -1414,22 +1414,20 @@ def verify_email():
            AND is_email_verified = 0
     """, token)
 
-    updated_rows = cur.rowcount        # ← 1 なら成功
+    updated = cur.rowcount       # ← 1 なら成功
     conn.commit()
     cur.close(); conn.close()
 
-    if updated_rows == 1:
-        return render_template(
-            'verify_result.html',
-            success=True,
-            msg='メールアドレスの確認が完了しました！'
-        )
-    else:
-        return render_template(
-            'verify_result.html',
-            success=False,
-            msg='リンクが無効、または期限切れです。'
-        )
+    success = (updated == 1)
+    msg = 'メールアドレスの確認が完了しました！' if success else \
+        'リンクが無効、または期限切れです。'
+
+    return render_template(
+        'verify_result.html',
+        success=success,
+        msg=msg,
+        updated_rows=updated  # ★ 追加
+    )
 
 
 # ─────────────────────────────────────────────

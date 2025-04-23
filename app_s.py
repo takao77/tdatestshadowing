@@ -1393,14 +1393,14 @@ TDA App'''
 # --- メール確認リンク ---------------------------
 @app.route('/verify_email')
 def verify_email():
-    token = request.args.get('token', '').strip()
-
-    if not token:
-        return render_template(
-            'verify_result.html',
-            success=False,
-            msg='リンクが無効、または期限切れです。'
-        )
+    # token = request.args.get('token', '').strip()
+    #
+    # if not token:
+    #     return render_template(
+    #         'verify_result.html',
+    #         success=False,
+    #         msg='リンクが無効、または期限切れです。'
+    #     )
 
     conn = get_db_connection()
     cur  = conn.cursor()

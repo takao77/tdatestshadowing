@@ -423,6 +423,19 @@ def login_user():
         if not check_password(password_input, db_pw_hash):
             return render_template('login.html', message='パスワードが違います')
 
+        # ── ★ ④ ログイン成功 ⇒ verify_token を NULL にする ──
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+                UPDATE dbo.users
+                   SET verify_token = NULL
+                 WHERE id = ?
+                   AND verify_token IS NOT NULL      -- 既に NULL ならスキップ
+            """, db_id)
+        conn.commit()
+        cur.close();
+        conn.close()
+
         session['user_id'] = db_id
         session['user_name'] = db_name
         return redirect(url_for('home'))

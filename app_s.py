@@ -121,7 +121,7 @@ app.config.update(
     MAIL_USERNAME = os.getenv('SMTP_USER', 'apikey'),
     MAIL_PASSWORD = os.getenv('SG_API_KEY'),          # ★ 環境変数名は自由
     MAIL_DEFAULT_SENDER = (
-        'TDA App',
+        'Polyagent AI',
         os.getenv('SMTP_FROM')
     )
 )
@@ -1391,12 +1391,13 @@ def register():
     body = f'''{name} さん
 
 以下のリンクをクリックしてメールアドレスを確認してください。
+Please click the link below to verify your e-mail address.
 
 {verify_link}
 
-TDA App'''
+Polyagent AI'''
     mail.send(Message(
-        subject='【TDA】メールアドレス確認のお願い',
+        subject='[Polyagent AI] メール確認 / Please verify your e-mail',
         recipients=[email],
         body=body
     ))
@@ -1412,7 +1413,7 @@ def verify_email():
         return render_template(
             'verify_result.html',
             success=False,
-            msg='リンクが無効、または期限切れです。',
+            msg='リンクが無効、または期限切れです。/ The link is invalid or has expired.',
             updated_rows=0
         )
 
@@ -1440,8 +1441,8 @@ def verify_email():
     conn.commit(); cur.close(); conn.close()
 
     success = (updated == 1)
-    msg = 'メールアドレスの確認が完了しました！' if success \
-          else 'リンクが無効、または期限切れです。'
+    msg = 'メールアドレスの確認が完了しました！/ Your e-mail has been verified successfully!' if success \
+          else 'リンクが無効、または期限切れです。/ The link is invalid or has expired.'
 
     return render_template(
         'verify_result.html',
@@ -1490,7 +1491,7 @@ def resend_verification():
     # メール送信
     verify_url = f"{VERIFY_BASE_URL}?token={new_token}"
     mail.send(Message(
-        subject="TDA App – Verify your email",
+        subject="Welcome to Polyagent AI – Verify your email",
         recipients=[email],
         html=render_template('mail_verify.html',
                              user_name=user_name,

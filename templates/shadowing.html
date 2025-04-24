@@ -316,14 +316,17 @@
     let currentWord = null;
     let currentSentence = null;
     let currentEF         = null;
+    let isDictation = false;
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function enterShadowMode() {
+        isDictation = false;
         $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').show();
         $('#dictation-container').hide();
     }
 
     function enterDictationMode() {
+        isDictation = true;
         $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').hide();
         $('#dictation-container').show();
     }
@@ -713,7 +716,7 @@
         }
 
         /* ⑤ practice タブだけ自己評価ボタン＋ガイド文を表示 */
-        if (tabName === 'practice') {
+        if (tabName === 'practice' && !isDictation) {
             $('.rating-container, #rating-guide').show();
         } else {
             $('.rating-container, #rating-guide').hide();
@@ -745,7 +748,11 @@
                     if (currentEF >= 3) enterDictationMode();
                     else enterShadowMode();
 
-                    $('.rating-container').show();
+                    if (!isDictation) {
+                        $('.rating-container, #rating-guide').show();   // Shadowing のときだけ
+                    } else {
+                        $('.rating-container, #rating-guide').hide();   // Dictation のときは非表示
+                    }
                 })
                 .catch(err => {
                     console.error("⚠️ fetchSentence error:", err);

@@ -185,6 +185,7 @@
       <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
         <button onclick="showTab(event, 'explanation')">解説モード</button>
         <button onclick="showTab(event, 'record')">録音モード</button>
+        <button onclick="showTab(event,'ai')">AI&nbsp;モード</button>
     </div>
 
     <!-- Tab Content -->
@@ -302,6 +303,20 @@
       </button>
     </div>
 
+    <div id="ai" class="tab-content">
+      <div id="chat-window" style="height:260px; overflow-y:auto; background:#222;
+           padding:10px; border-radius:8px; text-align:left; font-size:.9rem;"></div>
+
+      <!-- AI 音声を再生 -->
+      <audio id="ai-audio" style="width:100%; margin-top:8px;" controls></audio>
+
+      <!-- 録音して送信 -->
+      <div class="icon-container" style="justify-content:center; margin-top:12px;">
+          <button id="ai-record"  class="icon-btn"><i class="fas fa-microphone"></i></button>
+          <button id="ai-stop"    class="icon-btn red" disabled><i class="fas fa-stop"></i></button>
+      </div>
+</div>
+
   </div>
 
   <!-- jQuery and Bootstrap JS -->
@@ -317,6 +332,9 @@
     let currentSentence = null;
     let currentEF         = null;
     let isDictation = false;
+    let aiHistory = [];          // [{role:'user'|'assistant', text:'...'}]
+    let aiMediaRec;              // MediaRecorder
+    let aiChunks = [];
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function enterShadowMode() {
@@ -758,6 +776,63 @@
                     console.error("⚠️ fetchSentence error:", err);
                     $('#dynamic-sentence').text('🚨 読み込みエラー');
                 });
+    }
+
+    $('#ai-record').on('click', () => {
+      startRec();  $('#ai-record').prop('disabled',true);
+      $('#ai-stop').prop('disabled',false);
+    });
+    $('#ai-stop').on('click', async () => {
+      const blob = await stopRec();
+      $('#ai-stop').prop('disabled',true);
+      $('#ai-record').prop('disabled',false);
+
+      // ① ユーザー音声を STT  → text
+      const form = new FormData();
+      form.append('audio', blob, 'u.webm');          // ← mime は録音形式に合わせて
+      const r1 = await fetch('/api/stt_to_text', {method:'POST', body:form});
+        const j1 = await r1.json();
+        const userText = j1.text ?? '';
+
+
+        /* === “undefined” ガードをここに追加 ====================== */
+        if (!userText.trim()) {                       // 空文字／空白のみ
+            appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
+            return;                                     // 以降の処理は行わない
+        }
+        /* ======================================================== */
+
+        appendChat('user', userText);
+
+      // ② AI に投げてレスポンス＋音声をもらう
+      const r2 = await fetch('/api/ai_chat',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({user_text:userText, history:aiHistory})
+      });
+      const j = await r2.json();
+      appendChat('assistant', j.ai_text);
+      $('#ai-audio').attr('src','data:audio/mp3;base64,'+j.ai_audio).get(0).play();
+
+      // ③ ローカル履歴も更新
+      aiHistory = j.new_history;
+    });
+
+    function appendChat(role, text){
+      const line = `<p><b>${role==='user'?'🧑':'🤖'}:</b> ${text}</p>`;
+      $('#chat-window').append(line).scrollTop(9999);
+    }
+
+    function startRec(){
+      aiChunks=[]; aiMediaRec = new MediaRecorder(audioStream, { mimeType: 'audio/webm;codecs=opus'});
+      aiMediaRec.ondataavailable=e=>aiChunks.push(e.data);
+      aiMediaRec.start();
+    }
+    function stopRec(){
+      return new Promise(res=>{
+         aiMediaRec.onstop=()=>res(new Blob(aiChunks,{type:'audio/webm'}));
+         aiMediaRec.stop();
+      });
     }
 
 

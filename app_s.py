@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 import pyodbc
 import bcrypt
 import re
+from openai import AzureOpenAI
+import io
 import time
 import json
 import difflib
@@ -93,6 +95,10 @@ AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
 AZURE_OPENAI_DEPLOYMENT_NAME = 'tda_4'  # Hardcoded deployment name
 AZURE_SPEECH_API_KEY = os.getenv('AZURE_SPEECH_API_KEY')  # For Speech API
 AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION')  # Region for Speech API
+AZURE_OPENAI_STT_ENDPOINT =os.getenv('AZURE_OPENAI_STT_ENDPOINT')
+AZURE_OPENAI_STT_KEY = os.getenv('AZURE_OPENAI_STT_KEY')
+AZURE_OPENAI_STT_DEPLOY ="stt_model"
+STT_API_VER  = "2024-02-15-preview"
 
 # Define the path to the resources folder
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), 'resources')
@@ -131,6 +137,31 @@ VERIFY_BASE_URL = os.getenv(
     'https://tdatestshadowing.azurewebsites.net/verify_email'
 )
 # ────────────────────────────────────────────────
+
+client = AzureOpenAI(
+    api_key      = os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version  = "2024-02-15-preview",
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")  # 例: https://xxx.openai.azure.com
+)
+
+DEPLOY_CHAT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "tda_4")   # 4-o-mini のデプロイ名
+
+# --------------------- ① Chat 用 ----------------------------
+chat_client = AzureOpenAI(
+    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"),   # https://xxx.openai.azure.com
+    api_key        = os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version    = "2024-02-15-preview"
+)
+CHAT_DEPLOY = os.getenv("AZURE_OPENAI_CHAT_DEPLOY", "tda_4")    # gpt-4o-mini など
+
+# --------------------- ② STT 用（Whisper） ------------------
+stt_client = AzureOpenAI(
+    azure_endpoint = os.getenv("AZURE_OPENAI_STT_ENDPOINT"),    # 別リソースなら URL も別
+    api_key        = os.getenv("AZURE_OPENAI_STT_KEY"),
+    api_version    = "2024-02-15-preview"
+)
+
+STT_DEPLOY = os.getenv("AZURE_OPENAI_STT_DEPLOY", "stt_model")  # 例: whisper-1 の独自名
 
 def get_db_connection():
     """
@@ -397,6 +428,53 @@ def generate_idiom_meaning(idiom):
         return meaning
     else:
         raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
+
+
+# ────────────────────────────────────────────
+# Azure Speech で WAV → テキスト
+def speech_to_text(wav_path: str) -> str:
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_API_KEY,
+        region      =AZURE_SPEECH_REGION
+    )
+    audio_config  = speechsdk.audio.AudioConfig(filename=wav_path)
+
+    recognizer = speechsdk.SpeechRecognizer(
+        speech_config=speech_config,
+        audio_config =audio_config
+    )
+    result = recognizer.recognize_once()
+
+    if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+        return result.text
+    raise RuntimeError(f'Speech‐to‐text failed: {result.reason}')
+
+
+def tts_to_b64(text: str,
+               voice: str = "en-US-JennyNeural",
+               fmt: str   = speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
+              ) -> str:
+    """Azure Speech でテキストを MP3 に変換し Base64 文字列で返す"""
+    speech_key  = os.getenv("AZURE_SPEECH_API_KEY")
+    speech_reg  = os.getenv("AZURE_SPEECH_REGION")
+    if not (speech_key and speech_reg):
+        raise RuntimeError("AZURE_SPEECH_KEY / REGION が未設定です")
+
+    speech_cfg = speechsdk.SpeechConfig(
+        subscription=speech_key,
+        region=speech_reg
+    )
+    speech_cfg.speech_synthesis_voice_name = voice
+    speech_cfg.set_speech_synthesis_output_format(fmt)
+
+    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_cfg, audio_config=None)
+    result = synthesizer.speak_text_async(text).get()
+
+    if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
+        raise RuntimeError(f"TTS failed: {result.reason}")
+
+    # bytes → base64 文字列
+    return base64.b64encode(result.audio_data).decode("ascii")
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1501,5 +1579,81 @@ def resend_verification():
     return jsonify({'ok': True, 'msg': 'Verification mail sent'})
 
 
+@app.route("/api/stt_to_text", methods=["POST"])
+def stt_to_text():
+    """
+    フロントから送られた wav バイナリを
+    gpt-4o-mini-transcribe デプロイ (audio/transcriptions) へ投げ、
+    プレーンテキストを返す。
+    """
+    try:
+        # 受信 ------------------------------------------------------
+        file_storage = request.files["audio"]  # Werkzeug FileStorage
+        blob = file_storage.read()  # bytes
+        mime = file_storage.mimetype or "application/octet-stream"
+        filename = file_storage.filename or "audio.webm"  # 後方互換で名前も拝借
+        # ---------- REST 呼び出し ----------
+        url = (
+            f"{AZURE_OPENAI_STT_ENDPOINT}/openai/deployments/{AZURE_OPENAI_STT_DEPLOY}"
+            f"/audio/transcriptions?api-version={STT_API_VER}"
+        )
+        headers = {"api-key": AZURE_OPENAI_STT_KEY}
+        files   = {"file": (filename, blob, mime)}
+        data = {
+            "response_format": "text"       # json ではなく text
+            # language, prompt など必要に応じ追加
+        }
+
+        r = requests.post(url, headers=headers, files=files, data=data, timeout=90)
+        r.raise_for_status()                # 200 以外は例外送出
+        text = r.text.strip()               # text/plain で返る
+
+        return jsonify({"text": text})
+    except Exception as e:
+        app.logger.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai_chat", methods=["POST"])
+def ai_chat():
+    j = request.get_json(force=True)
+    user_text = j.get("user_text", "")
+    history   = j.get("history", [])
+
+    sys_prompt = ("You are an English tutor. "
+                  "Answer in easy English, max 3 sentences.")
+    msgs = [{"role": "system", "content": sys_prompt}] + \
+           [{"role": h["role"], "content": h["text"]} for h in history] + \
+           [{"role": "user",   "content": user_text}]
+
+    try:
+        chat = chat_client.chat.completions.create(
+            model   = CHAT_DEPLOY,                 # gpt-4o-mini デプロイ名
+            messages= msgs,
+            temperature = 0.7
+        )
+        ai_text = chat.choices[0].message.content.strip()
+    except Exception as e:
+        app.logger.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+    # --- TTS（変化なし） ---
+    try:
+        ai_audio_b64 = tts_to_b64(ai_text)
+    except Exception as e:
+        app.logger.exception(e)
+        return jsonify({"error": "TTS failed: " + str(e)}), 500
+
+    new_hist = (history + [{"role":"user","text":user_text},
+                           {"role":"assistant","text":ai_text}])[-10:]
+
+    return jsonify({
+        "ai_text":  ai_text,
+        "ai_audio": ai_audio_b64,
+        "new_history": new_hist
+    })
+
+
 if __name__ == '__main__':
     app.run(debug=True)
+

@@ -290,48 +290,46 @@ def get_access_token():
     response.raise_for_status()
     return response.text
 
-def generate_speech(text, access_token, language_code, voice_name, style=None):
+
+# --- 既存ユーティリティの上に追記 or 置換 -----------------
+DEFAULT_VOICE = "en-US-JennyMultilingualNeural"   # Long-Form 対応 voice
+DEFAULT_STYLE = "chat"                            # 自然な会話調
+
+
+def generate_speech(
+    text: str,
+    access_token: str,
+    language_code: str = "en-US",
+    voice_name: str   = DEFAULT_VOICE,
+    style: str        = DEFAULT_STYLE
+) -> bytes:
+    """
+    Azure Neural TTS で音声バイナリを返す。
+    Long-Form Neural Voice + style 属性をデフォルトにした改訂版。
+    """
     headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/ssml+xml; charset=utf-8',
-        'X-Microsoft-OutputFormat': 'audio-16khz-32kbitrate-mono-mp3'
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type":  "application/ssml+xml; charset=utf-8",
+        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3"
     }
-    if style:
-        body = f"""
-        <speak version='1.0' xml:lang='{language_code}'>
-            <voice xml:lang='{language_code}' xml:gender='Female' name='{voice_name}' style='{style}'>
-                {text}
-            </voice>
-        </speak>
-        """
-    else:
-        body = f"""
-        <speak version='1.0' xml:lang='{language_code}'>
-            <voice xml:lang='{language_code}' xml:gender='Female' name='{voice_name}'>
-                {text}
-            </voice>
-        </speak>
-        """
-    response = requests.post(AZURE_TTS_API_URL, headers=headers, data=body.encode('utf-8'))
 
-    if response.status_code != 200:
-        print(f"Error: {response.status_code}, {response.text}")
-        response.raise_for_status()
-    else:
-        try:
-            print(f"Generated Text: '{text}'")
-            print(f"Generated Text Length: {len(text)}")
+    # --- SSML を組み立て -----------------------------------
+    ssml = f"""
+    <speak version="1.0" xml:lang="{language_code}"
+    xmlns:mstts="http://www.w3.org/2001/mstts">
+      <voice name="{voice_name}">
+        <mstts:express-as style="{style}">
+          {text}
+        </mstts:express-as>
+      </voice>
+    </speak>
+    """
 
-            audio_data = response.content
-            print(f"Received Audio Data Length: {len(audio_data)} bytes")
+    url = os.getenv("AZURE_TTS_API_URL")
+    response = requests.post(url, headers=headers, data=ssml.encode("utf-8"))
+    response.raise_for_status()
+    return response.content
 
-            if not audio_data or len(audio_data) < 100:
-                raise ValueError("Received audio data is invalid or too short.")
-
-            return audio_data
-        except Exception as e:
-            print(f"Error decoding audio data: {str(e)}")
-            raise
 
 def generate_encouraging_message(language):
     if language == 'en':
@@ -450,30 +448,49 @@ def speech_to_text(wav_path: str) -> str:
     raise RuntimeError(f'Speech‐to‐text failed: {result.reason}')
 
 
-def tts_to_b64(text: str,
-               voice: str = "en-US-JennyNeural",
-               fmt: str   = speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
-              ) -> str:
-    """Azure Speech でテキストを MP3 に変換し Base64 文字列で返す"""
-    speech_key  = os.getenv("AZURE_SPEECH_API_KEY")
-    speech_reg  = os.getenv("AZURE_SPEECH_REGION")
-    if not (speech_key and speech_reg):
-        raise RuntimeError("AZURE_SPEECH_KEY / REGION が未設定です")
-
+def tts_to_b64(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    style: str = DEFAULT_STYLE,
+    fmt: speechsdk.SpeechSynthesisOutputFormat =
+         speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
+) -> str:
+    """
+    Azure Speech SDK で TTS → base64。
+    Long-Form voice + style がデフォルト。
+    """
     speech_cfg = speechsdk.SpeechConfig(
-        subscription=speech_key,
-        region=speech_reg
+        subscription=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION")
     )
-    speech_cfg.speech_synthesis_voice_name = voice
+    # 出力フォーマットを忘れず設定
     speech_cfg.set_speech_synthesis_output_format(fmt)
 
-    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_cfg, audio_config=None)
-    result = synthesizer.speak_text_async(text).get()
+    # --- ★ 名前空間を明示した SSML -------------------------
+    ssml = f"""
+<speak version="1.0"
+       xmlns="http://www.w3.org/2001/10/synthesis"
+       xmlns:mstts="http://www.w3.org/2001/mstts"
+       xml:lang="{voice.split('-')[0]}">
+  <voice name="{voice}">
+    <mstts:express-as style="{style}">
+      {text}
+    </mstts:express-as>
+  </voice>
+</speak>
+""".strip()
+
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_cfg,
+        audio_config=None
+    )
+    result = synthesizer.speak_ssml_async(ssml).get()
 
     if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
-        raise RuntimeError(f"TTS failed: {result.reason}")
+        # 取消理由を詳しく取得
+        details = speechsdk.SpeechSynthesisCancellationDetails.from_result(result)
+        raise RuntimeError(f"TTS canceled: {details.reason} - {details.error_details}")
 
-    # bytes → base64 文字列
     return base64.b64encode(result.audio_data).decode("ascii")
 
 
@@ -1617,41 +1634,80 @@ def stt_to_text():
 @app.route("/api/ai_chat", methods=["POST"])
 def ai_chat():
     j = request.get_json(force=True)
-    user_text = j.get("user_text", "")
-    history   = j.get("history", [])
+    user_text   = j.get('user_text','')
+    history     = j.get('history',[])
+    target_word = j.get('target_word','')   # ⭐ front から現在ターゲット
 
-    sys_prompt = ("You are an English tutor. "
-                  "Answer in easy English, max 3 sentences.")
-    msgs = [{"role": "system", "content": sys_prompt}] + \
-           [{"role": h["role"], "content": h["text"]} for h in history] + \
-           [{"role": "user",   "content": user_text}]
+    need_jp = j.get('need_jp_help',False)
 
+    sys_prompt=f"""
+You are Alex, an English tutor. Target word: "{target_word}".
+Ask a question requiring this word, then rate the learner's reply 1‑5.
+Respond JSON: {{\"reply\":..., \"score\":n}}
+If NEED_JP_HELP is true, append Japanese hint under key jp_hint.
+NEED_JP_HELP={need_jp}
+"""
+
+    messages=[{"role":"system","content":sys_prompt}] + \
+             [{"role":h['role'],"content":h['text']} for h in history] + \
+             [{"role":"user","content":user_text}]
+
+    chat = chat_client.chat.completions.create(
+        model=CHAT_DEPLOY,
+        messages=messages,
+        temperature=0.7,
+        response_format={"type":"json_object"}
+    )
+    jres=json.loads(chat.choices[0].message.content)
+    ai_text = jres.get('reply','')
+    score   = int(jres.get('score',3))
+    jp_hint = jres.get('jp_hint','')
+
+    # --- EF 更新
+    if target_word and 'vocab_id' in j:
+        form={'vocab_id':j['vocab_id'],'self_score':score}
+        requests.post(url_for('submit_practice',_external=True),data=form)
+
+    ai_audio_b64 = tts_to_b64(ai_text)
+
+    new_hist = (history+[{'role':'user','text':user_text},{'role':'assistant','text':ai_text}])[-10:]
+    return jsonify({'ai_text':ai_text,'ai_audio':ai_audio_b64,'score':score,'jp_hint':jp_hint,'new_history':new_hist})
+
+
+@app.route('/api/ai_session/start')
+def ai_session_start():
+    """返り値: { words:[{vocab_id,word,sentence,ef}], user_level:str }"""
+    if 'user_id' not in session:
+        return jsonify({'error':'login required'}),403
+
+    course  = request.args.get('course','')
+    user_id = session['user_id']
+
+    conn,cursor = get_db_connection(),None
     try:
-        chat = chat_client.chat.completions.create(
-            model   = CHAT_DEPLOY,                 # gpt-4o-mini デプロイ名
-            messages= msgs,
-            temperature = 0.7
-        )
-        ai_text = chat.choices[0].message.content.strip()
-    except Exception as e:
-        app.logger.exception(e)
-        return jsonify({"error": str(e)}), 500
+        cursor = conn.cursor()
+        cursor.execute("""
+            WITH latest AS (
+              SELECT vocab_id, ef,
+                     ROW_NUMBER()OVER(PARTITION BY vocab_id ORDER BY review_time DESC) rn
+                FROM dbo.vocab_reviews WHERE user_id=?
+            )
+            SELECT TOP 3 vi.id, vi.word, vi.sentence,
+                   ISNULL(lat.ef,2.5) AS ef
+              FROM dbo.vocab_items vi
+         LEFT JOIN latest lat ON vi.id = lat.vocab_id AND lat.rn=1
+             WHERE vi.course=?
+               AND ( lat.vocab_id IS NULL -- 未学習
+                  OR lat.ef < 4           -- 要復習
+                  OR lat.vocab_id IN (SELECT vocab_id FROM latest WHERE ef<4) )
+             ORDER BY NEWID()            -- ランダム 3 語
+        """, user_id, course)
+        rows=[{'vocab_id':r.id,'word':r.word,'sentence':r.sentence,'ef':float(r.ef)} for r in cursor]
+    finally:
+        if cursor: cursor.close(); conn.close()
 
-    # --- TTS（変化なし） ---
-    try:
-        ai_audio_b64 = tts_to_b64(ai_text)
-    except Exception as e:
-        app.logger.exception(e)
-        return jsonify({"error": "TTS failed: " + str(e)}), 500
-
-    new_hist = (history + [{"role":"user","text":user_text},
-                           {"role":"assistant","text":ai_text}])[-10:]
-
-    return jsonify({
-        "ai_text":  ai_text,
-        "ai_audio": ai_audio_b64,
-        "new_history": new_hist
-    })
+    level = 'beginner' if sum(w['ef'] for w in rows)/max(len(rows),1) < 2.2 else 'intermediate'
+    return jsonify({'words':rows,'user_level':level})
 
 
 if __name__ == '__main__':

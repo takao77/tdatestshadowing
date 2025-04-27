@@ -347,6 +347,21 @@
     let needJpHelp   = false;      // ← Phase1 以降用フラグ
 
     /* === 1) まずグローバル関数を宣言 ========================= */
+    function updateVisibility() {
+        const practice = $('#practice').hasClass('active');
+        const ai = $('#ai').hasClass('active');
+        const dictation = practice && isDictation;
+
+        // ① 例文
+        $('#dynamic-sentence').toggle(!dictation);
+
+        // ② 自己評価
+        $('.rating-container, #rating-guide').toggle(practice && !dictation);
+
+        // ③ dictation containerはDictationのときのみ
+        $('#dictation-container').toggle(dictation);
+    }
+
     function enterShadowMode() {
         isDictation = false;
         $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').show();
@@ -412,6 +427,14 @@
                 $('#dictation-next').hide();
 
                 $('#dictation-audio').attr('src', '').hide();
+
+                const pAudio = $('#practice-audio').get(0);
+                if (pAudio) {
+                    pAudio.pause();
+                    pAudio.currentTime = 0;
+                }
+
+                $('#practice-audio').attr('src', '');
 
                 fetchSentence();
         }
@@ -834,6 +857,9 @@
         if (tabName === 'ai') {
             $('#dynamic-sentence').show();
         }
+
+        updateVisibility();
+
     }
 
     // Function to fetch a new sentence and reset relevant elements

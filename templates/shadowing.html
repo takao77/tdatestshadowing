@@ -307,6 +307,11 @@
       <div id="chat-window" style="height:260px; overflow-y:auto; background:#222;
            padding:10px; border-radius:8px; text-align:left; font-size:.9rem;"></div>
 
+        <p id="ai-recording-indicator"
+           style="display:none; color:#e74c3c; font-weight:600; margin:6px 0;">
+            <i class="fas fa-circle-notch fa-spin"></i>&nbsp;Recording…
+        </p>
+
       <!-- AI 音声を再生 -->
       <audio id="ai-audio" style="width:100%; margin-top:8px;" controls></audio>
 
@@ -332,9 +337,14 @@
     let currentSentence = null;
     let currentEF         = null;
     let isDictation = false;
-    let aiHistory = [];          // [{role:'user'|'assistant', text:'...'}]
+
+    /* === AI 用 === */
+    let targetWords  = [];   // [{vocab_id,word,sentence,ef}]
+    let curIndex     = 0;    // 0-2 をループ
+    let aiHistory    = [];   // {role,text} を最大10
     let aiMediaRec;              // MediaRecorder
     let aiChunks = [];
+    let needJpHelp   = false;      // ← Phase1 以降用フラグ
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function enterShadowMode() {
@@ -360,6 +370,7 @@
           console.error('Error accessing microphone:', error);
           alert('Microphone access denied or unavailable.');
         }
+
 
         // Fetch the initial sentence
         fetchSentence();
@@ -659,6 +670,89 @@
             const sentence = $('#dynamic-sentence').text();
             explainSentenceChinese(sentence);  // 中国語向け関数を呼ぶ
         });
+
+// ① 録音開始
+        $('#ai-record').on('click', () => {
+            startAiRec();                                  // ← 新版の recorder
+            $('#ai-record').prop('disabled', true);
+            $('#ai-stop').prop('disabled', false);
+        });
+
+        // ② 録音停止 → STT → /api/ai_chat へ送信
+        $('#ai-stop').on('click', async () => {
+            const blob = await stopAiRec();                // ← 新版の stop
+            $('#ai-stop').prop('disabled', true);
+            $('#ai-record').prop('disabled', false);
+
+            /* 1) STT -------------------------------------------- */
+            const f = new FormData();
+            f.append('audio', blob, 'u.webm');
+            const sttRes = await fetch('/api/stt_to_text', {method: 'POST', body: f});
+            const sttJson = await sttRes.json();
+            const userText = (sttJson.text || '').trim();
+
+            if (!userText) {                               // 認識失敗ガード
+                appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
+                return;
+            }
+            appendChat('user', userText);
+
+            /* ---------- (3) AI へ投げる JSON を修正 ---------- */
+            const payload = {
+                user_text: userText,        // ユーザーの発話文字列
+                history: aiHistory,       // 直近の会話履歴 (最大10件)
+                target_word: currentWord,     // 練習モードで出ている単語
+                vocab_id: currentVocabId,  // その単語の DB ID
+                need_jp_help: needJpHelp       // JP ヘルプを出すかどうか（将来用）
+            };
+
+            const chatRes = await fetch('/api/ai_chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const chatJson = await chatRes.json();
+
+            appendChat('assistant', chatJson.ai_text);
+            $('#ai-audio')
+                    .attr('src', 'data:audio/mp3;base64,' + chatJson.ai_audio)
+                    .get(0).play();
+
+            aiHistory = chatJson.new_history;              // ローカル履歴更新
+        });
+
+        /* ======== ミニ util =================================== */
+        function appendChat(role, text) {
+            const icon = role === 'user' ? '🧑' : '🤖';
+            $('#chat-window')
+                    .append(`<p><b>${icon}:</b> ${text}</p>`)
+                    .scrollTop(1e6);
+        }
+
+        /* ======== Recorder helpers =========================== */
+        let aiMediaRec, aiChunks = [];
+
+        async function startAiRec() {
+            aiChunks = [];
+            if (!audioStream) {
+                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+            }
+            aiMediaRec = new MediaRecorder(audioStream, {mimeType: 'audio/webm;codecs=opus'});
+            aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
+            aiMediaRec.start();
+
+            $('#ai-recording-indicator').show();
+        }
+
+        function stopAiRec() {
+            return new Promise(res => {
+                aiMediaRec.onstop = () => {
+                    $('#ai-recording-indicator').hide();
+                    res(new Blob(aiChunks, {type: 'audio/webm'}));
+                };
+                aiMediaRec.stop();
+            });
+        }
     });
 
 // ★ 新しく解説をfetchする関数
@@ -733,11 +827,12 @@
             $('#explanation-word-wrap').hide();
         }
 
-        /* ⑤ practice タブだけ自己評価ボタン＋ガイド文を表示 */
-        if (tabName === 'practice' && !isDictation) {
-            $('.rating-container, #rating-guide').show();
-        } else {
-            $('.rating-container, #rating-guide').hide();
+        const showRating = (tabName === 'practice' && !isDictation);
+        $('.rating-container, #rating-guide').toggle(showRating);
+
+        /* ⑤ ★ AI タブでは文も非表示 */
+        if (tabName === 'ai') {
+            $('#dynamic-sentence').show();
         }
     }
 
@@ -762,6 +857,16 @@
                     // 画面に反映
                     $('#dynamic-sentence').text(currentSentence);
 
+                    /* ---------- ② ★ ここで AI 用ターゲットも上書き ---------- */
+                    targetWords = [{
+                        vocab_id: currentVocabId,
+                        word: currentWord,
+                        sentence: currentSentence,
+                        ef: currentEF
+                    }];
+
+                    curIndex = 0;         // 念のためリセット
+
                     // ★ EF に応じてモードを切替
                     if (currentEF >= 3) enterDictationMode();
                     else enterShadowMode();
@@ -778,61 +883,27 @@
                 });
     }
 
-    $('#ai-record').on('click', () => {
-      startRec();  $('#ai-record').prop('disabled',true);
-      $('#ai-stop').prop('disabled',false);
-    });
-    $('#ai-stop').on('click', async () => {
-      const blob = await stopRec();
-      $('#ai-stop').prop('disabled',true);
-      $('#ai-record').prop('disabled',false);
+    function appendChat(role, text) {
+        // ① アイコンを先に決めて…
+        const icon = role === 'user' ? '🧑' : '🤖';
 
-      // ① ユーザー音声を STT  → text
-      const form = new FormData();
-      form.append('audio', blob, 'u.webm');          // ← mime は録音形式に合わせて
-      const r1 = await fetch('/api/stt_to_text', {method:'POST', body:form});
-        const j1 = await r1.json();
-        const userText = j1.text ?? '';
+        // ② テンプレートの中はシンプルに
+        const line = `<p><b>${icon}:</b> ${text}</p>`;
 
-
-        /* === “undefined” ガードをここに追加 ====================== */
-        if (!userText.trim()) {                       // 空文字／空白のみ
-            appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
-            return;                                     // 以降の処理は行わない
-        }
-        /* ======================================================== */
-
-        appendChat('user', userText);
-
-      // ② AI に投げてレスポンス＋音声をもらう
-      const r2 = await fetch('/api/ai_chat',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({user_text:userText, history:aiHistory})
-      });
-      const j = await r2.json();
-      appendChat('assistant', j.ai_text);
-      $('#ai-audio').attr('src','data:audio/mp3;base64,'+j.ai_audio).get(0).play();
-
-      // ③ ローカル履歴も更新
-      aiHistory = j.new_history;
-    });
-
-    function appendChat(role, text){
-      const line = `<p><b>${role==='user'?'🧑':'🤖'}:</b> ${text}</p>`;
-      $('#chat-window').append(line).scrollTop(9999);
+        $('#chat-window').append(line).scrollTop(9999);
     }
 
-    function startRec(){
-      aiChunks=[]; aiMediaRec = new MediaRecorder(audioStream, { mimeType: 'audio/webm;codecs=opus'});
-      aiMediaRec.ondataavailable=e=>aiChunks.push(e.data);
-      aiMediaRec.start();
-    }
-    function stopRec(){
-      return new Promise(res=>{
-         aiMediaRec.onstop=()=>res(new Blob(aiChunks,{type:'audio/webm'}));
-         aiMediaRec.stop();
-      });
+    /* ---------- (4) Today Target を 1 語だけ表示 ---------- */
+    function renderTargetList() {
+        // ❶ すでに表示されている行を削除
+        $('#chat-window .today-target').remove();
+        // fetchSentence() が走って currentWord が入っていない場合は何もしない
+        if (!currentWord) return;
+
+        // 先頭に挿入してスクロールは一番上に据え置き
+        $('#chat-window').prepend(
+                `<p><b>🎯 Today&nbsp;Target:</b> ${currentWord}</p>`
+        );
     }
 
 

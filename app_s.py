@@ -21,6 +21,7 @@ import string
 import math
 from flask_mail import Mail, Message
 import secrets
+import tempfile
 
 
 # Load environment variables from .env file
@@ -1631,21 +1632,82 @@ def stt_to_text():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/stt_to_text_speech", methods=["POST"])
+def stt_to_text_speech():
+    """
+    WebM を受け取り Azure Speech で英語 STT。
+    target_word / target_sentence が渡って来たら Phrase List に加える
+    """
+    try:
+        # ---------- 受信 ----------
+        fs = request.files["audio"]                       # 録音 blob
+        tmp_webm = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+        fs.save(tmp_webm.name)
+
+        # ---------- WebM → WAV ----------
+        wav_path = ensure_correct_wav_format(tmp_webm.name)
+
+        # ---------- Speech recognizer ----------
+        speech_cfg = speechsdk.SpeechConfig(
+            subscription=AZURE_SPEECH_API_KEY,
+            region=AZURE_SPEECH_REGION,
+            speech_recognition_language="en-US"
+        )
+        audio_cfg  = speechsdk.audio.AudioConfig(filename=wav_path)
+        recognizer = speechsdk.SpeechRecognizer(speech_cfg, audio_cfg)
+
+        # ---------- ★ Phrase List を動的に設定 ----------
+        t_word = request.form.get('target_word', '').strip()
+        t_sent = request.form.get('target_sentence', '').strip()
+
+        if t_word or t_sent:                # 何か来ていれば追加
+            plist = speechsdk.PhraseListGrammar.from_recognizer(recognizer)
+            if t_word:
+                plist.addPhrase(t_word)
+            if t_sent:
+                plist.addPhrase(t_sent)
+
+        # ---------- STT ----------
+        result = recognizer.recognize_once()
+        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+            return jsonify({"text": result.text})
+        elif result.reason == speechsdk.ResultReason.NoMatch:
+            return jsonify({"text": ""})
+        else:
+            details = speechsdk.CancellationDetails.from_result(result)
+            return jsonify({"error": details.error_details}), 500
+
+    except Exception as e:
+        app.logger.exception(e)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        for p in (tmp_webm.name, wav_path):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+
 @app.route("/api/ai_chat", methods=["POST"])
 def ai_chat():
     j = request.get_json(force=True)
     user_text   = j.get('user_text','')
     history     = j.get('history',[])
-    target_word = j.get('target_word','')   # ⭐ front から現在ターゲット
-
+    target_word = j.get('target_word','')
+    target_sentence = j.get('target_sentence', '')
     need_jp = j.get('need_jp_help',False)
 
     sys_prompt=f"""
-You are Alex, an English tutor. Target word: "{target_word}".
-Ask a question requiring this word, then rate the learner's reply 1‑5.
-Respond JSON: {{\"reply\":..., \"score\":n}}
-If NEED_JP_HELP is true, append Japanese hint under key jp_hint.
+You are Alex, an English tutor.
+
+Target **word** : "{target_word}"
+Target **sentence** : "{target_sentence}"
+
+First, briefly explain the word *and* the sentence, then ask the learner
+to repeat the sentence aloud. After the learner answers, score 1-5, etc…
+
 NEED_JP_HELP={need_jp}
+Respond JSON: {{"reply":..., "score":n, "jp_hint":...}}
 """
 
     messages=[{"role":"system","content":sys_prompt}] + \

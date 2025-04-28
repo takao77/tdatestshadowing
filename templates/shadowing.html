@@ -345,6 +345,7 @@
     let aiMediaRec;              // MediaRecorder
     let aiChunks = [];
     let needJpHelp   = false;      // ← Phase1 以降用フラグ
+    let aiIntroDone = false;
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function updateVisibility() {
@@ -710,7 +711,9 @@
             /* 1) STT -------------------------------------------- */
             const f = new FormData();
             f.append('audio', blob, 'u.webm');
-            const sttRes = await fetch('/api/stt_to_text', {method: 'POST', body: f});
+            f.append('target_word',     currentWord);
+            f.append('target_sentence', currentSentence);
+            const sttRes = await fetch('/api/stt_to_text_speech', {method: 'POST', body: f});
             const sttJson = await sttRes.json();
             const userText = (sttJson.text || '').trim();
 
@@ -725,6 +728,7 @@
                 user_text: userText,        // ユーザーの発話文字列
                 history: aiHistory,       // 直近の会話履歴 (最大10件)
                 target_word: currentWord,     // 練習モードで出ている単語
+                target_sentence: currentSentence,// ★ 追加：例文も渡す
                 vocab_id: currentVocabId,  // その単語の DB ID
                 need_jp_help: needJpHelp       // JP ヘルプを出すかどうか（将来用）
             };
@@ -858,6 +862,11 @@
             $('#dynamic-sentence').show();
         }
 
+        if (tabName === 'ai' && !aiIntroDone) {
+            aiIntroDone = true;
+            startAiIntro();                 // ★ 新関数
+        }
+
         updateVisibility();
 
     }
@@ -930,6 +939,46 @@
         $('#chat-window').prepend(
                 `<p><b>🎯 Today&nbsp;Target:</b> ${currentWord}</p>`
         );
+    }
+
+    async function startAiIntro() {
+        // 0) UI 側の準備
+        $('#ai-record').prop('disabled', true);   // 録音まだ禁止
+        appendChat('assistant', '⏳ ちょっと待ってね…');
+
+        // 1) AI へ指示を組み立て
+        const sysMsg = `
+        Please explain the word "${currentWord}" in one short line,
+        then read the example sentence "${currentSentence}" slowly
+        and end with the phrase: "Your turn! Please repeat.".
+    `.trim();
+
+        // 2) back-end へ投げる
+        const res = await fetch('/api/ai_chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                user_text: sysMsg,
+                history: aiHistory           // ← 既存履歴を活用
+            })
+        });
+        const js = await res.json();
+
+        // 3) 画面反映 & 音声再生
+        $('#chat-window').children().last().remove();       // ⏳ 行を削除
+        appendChat('assistant', js.ai_text);
+        const audioEl = $('#ai-audio')
+                .attr('src', 'data:audio/mp3;base64,' + js.ai_audio)
+                .get(0);
+        audioEl.play();
+
+        // 4) 再生が終わったら録音解放
+        audioEl.onended = () => {
+            $('#ai-record').prop('disabled', false);
+        };
+
+        // 5) 履歴更新
+        aiHistory = js.new_history;
     }
 
 

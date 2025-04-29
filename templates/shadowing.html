@@ -166,6 +166,21 @@
       background: #2980b9;
       transform: scale(1.1);
     }
+    .home-link,
+    .logout-btn {
+        z-index: 1000; /* ← 充分に大きければ OK */
+    }
+    @media (max-width:600px){
+      body{
+          align-items:flex-start;   /* カードを上寄せに */
+          padding-top:70px;         /* 上に余白を確保 */
+      }
+      .container{
+          width:100%;
+          height:calc(100vh - 100px);
+          overflow-y:auto;          /* はみ出せばスクロール */
+      }
+    }
   </style>
 </head>
 <body>

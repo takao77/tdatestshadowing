@@ -1110,7 +1110,10 @@ def get_due_vocab():
                     vr.review_time IS NULL
                  OR vr.review_time <= DATEADD(minute,-10,GETUTCDATE())
               )
-            ORDER BY ISNULL(vr.next_review,'1900-01-01') ASC
+            ORDER BY
+                    COALESCE(vr.ef, 3.0)               ASC,
+                    ISNULL(vr.next_review,'1900-01-01') ASC,
+                    NEWID()
         """, user_id, course)
 
     rows = cursor.fetchall()
@@ -1726,9 +1729,9 @@ Respond JSON: {{"reply":..., "score":n, "jp_hint":...}}
     jp_hint = jres.get('jp_hint','')
 
     # --- EF 更新
-    if target_word and 'vocab_id' in j:
-        form={'vocab_id':j['vocab_id'],'self_score':score}
-        requests.post(url_for('submit_practice',_external=True),data=form)
+    # if target_word and 'vocab_id' in j:
+    #     form={'vocab_id':j['vocab_id'],'self_score':score}
+    #     requests.post(url_for('submit_practice',_external=True),data=form)
 
     ai_audio_b64 = tts_to_b64(ai_text)
 

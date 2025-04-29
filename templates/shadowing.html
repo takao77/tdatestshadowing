@@ -394,6 +394,39 @@
         return '';                             // ブラウザ任せ
     }
 
+    async function ensureMicAlive() {
+      const track = audioStream.getAudioTracks()[0];
+
+      track.addEventListener('ended', () => {
+        console.warn('Mic track ended - reacquiring…');
+        reacquireMic();
+      });
+
+      track.addEventListener('mute',  () => {
+        console.warn('Mic muted');
+        // 必要なら UI に表示
+      });
+      track.addEventListener('unmute', () => console.log('Mic unmuted'));
+    }
+
+    async function reacquireMic() {
+      try {
+        audioStream.getTracks().forEach(t => t.stop());  // 古い stream を破棄
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+        ensureMicAlive();            // 再帰的に監視を張り直す
+      } catch(e) {
+        console.error('Mic reacquire failed', e);
+        alert('🎙️ マイクが無効になりました。設定を確認してもう一度お試しください。');
+      }
+    }
+
+    function setMicStatus(ok) {
+      $('#ai-recording-indicator')
+          .css('color', ok ? '#e74c3c' : '#7f8c8d')
+          .html(ok ? '<i class="fas fa-circle-notch fa-spin"></i> Recording…'
+                    : 'Mic disconnected – tap to retry');
+    }
+
     $(document).ready(async function() {
         const course = "{{ course }}";  // Get the course passed from the backend
 
@@ -787,12 +820,21 @@
             if (!audioStream) {
                 audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
             }
+            /* ② 取得直後に監視をセット */
+            ensureMicAlive();
+
             const mime = chooseMime();
             aiMediaRec = mime ? new MediaRecorder(audioStream, {mimeType: mime})
                     : new MediaRecorder(audioStream);
 
             aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
-            aiMediaRec.start(1000);
+
+            try {
+                aiMediaRec.start(1000);                 // 1 s チャンク
+            } catch (e) {
+                console.warn('timeslice unsupported, retry w/o timeslice', e);
+                aiMediaRec.start();                     // fallback
+            }
 
             $('#ai-recording-indicator').show();
         }

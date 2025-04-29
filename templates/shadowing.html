@@ -182,10 +182,10 @@
 
     <!-- Tabs for Practice Mode and Record Mode -->
     <div class="tab">
-      <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
+      <button class="active" onclick="showTab(event,'ai')">AI&nbsp;モード</button>
+        <button onclick="showTab(event, 'practice')">練習モード</button>
         <button onclick="showTab(event, 'explanation')">解説モード</button>
         <button onclick="showTab(event, 'record')">録音モード</button>
-        <button onclick="showTab(event,'ai')">AI&nbsp;モード</button>
     </div>
 
     <!-- Tab Content -->
@@ -320,7 +320,12 @@
           <button id="ai-record"  class="icon-btn"><i class="fas fa-microphone"></i></button>
           <button id="ai-stop"    class="icon-btn red" disabled><i class="fas fa-stop"></i></button>
       </div>
-</div>
+        <div class="next-button-container" style="margin-top:18px;">
+            <button id="ai-next" class="icon-btn blue">
+            <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
 
   </div>
 
@@ -361,18 +366,19 @@
 
         // ③ dictation containerはDictationのときのみ
         $('#dictation-container').toggle(dictation);
+
+        /* ★ ④ Shadowing 用 UI（practice-btn / audio）*/
+        $('#practice-btn, #practice-audio').toggle(practice && !dictation);
     }
 
     function enterShadowMode() {
         isDictation = false;
-        $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').show();
-        $('#dictation-container').hide();
+        updateVisibility();
     }
 
     function enterDictationMode() {
         isDictation = true;
-        $('#dynamic-sentence, #practice-btn, #practice-audio, #rating-guide, .rating-container').hide();
-        $('#dictation-container').show();
+        updateVisibility();
     }
 
     $(document).ready(async function() {
@@ -387,9 +393,7 @@
           alert('Microphone access denied or unavailable.');
         }
 
-
-        // Fetch the initial sentence
-        fetchSentence();
+        await fetchSentence();
 
         $('.rating-btn').on('click', async function () {
             const score = $(this).data('score');
@@ -780,6 +784,44 @@
                 aiMediaRec.stop();
             });
         }
+
+        /* ===== 1. ➡︎ ボタンを押したら次の語句へ ===== */
+        $('#ai-next').on('click', async function () {
+
+            /* ① チャット画面と履歴をリセット */
+            $('#chat-window').empty();
+            aiHistory = [];
+            aiIntroDone = false;     // ← Intro を再度走らせるため
+
+            /* ② 新しい語句を取得 */
+            await fetchNextAiItem(); // ⇦ ★ 新関数（下で定義）
+
+            /* ③ AI のイントロを再スタート */
+            startAiIntro();
+        });
+
+        /* ===== 2. AI 用に語句を取って来る関数 ===== */
+        async function fetchNextAiItem() {
+            try {
+                const course = "{{ course }}";                // Jinja から注入
+                const res = await fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`);
+                const js = await res.json();
+                if (js.error) throw js.error;
+
+                // 受け取った語句をグローバルに反映
+                currentSentence = js.sentence;
+                currentWord = js.word;
+                currentVocabId = js.vocab_id ?? null;        // DB 用 ID があれば
+                $('#dynamic-sentence').text(currentSentence);
+
+            } catch (e) {
+                console.error('fetchNextAiItem error:', e);
+                $('#dynamic-sentence').text('🚨 新しい語句の取得に失敗しました');
+            }
+        }
+
+        /* --- 追加 (C) 初期タブを AI に --- */
+        showTab({currentTarget: $('button[onclick*="ai"]')[0]}, 'ai');
     });
 
 // ★ 新しく解説をfetchする関数
@@ -854,10 +896,10 @@
             $('#explanation-word-wrap').hide();
         }
 
-        const showRating = (tabName === 'practice' && !isDictation);
-        $('.rating-container, #rating-guide').toggle(showRating);
+        // const showRating = (tabName === 'practice' && !isDictation);
+        // $('.rating-container, #rating-guide').toggle(showRating);
 
-        /* ⑤ ★ AI タブでは文も非表示 */
+        /* ⑤ ★ AI タブでは文表示 */
         if (tabName === 'ai') {
             $('#dynamic-sentence').show();
         }
@@ -906,11 +948,11 @@
                     if (currentEF >= 3) enterDictationMode();
                     else enterShadowMode();
 
-                    if (!isDictation) {
-                        $('.rating-container, #rating-guide').show();   // Shadowing のときだけ
-                    } else {
-                        $('.rating-container, #rating-guide').hide();   // Dictation のときは非表示
-                    }
+                    // if (!isDictation) {
+                    //     $('.rating-container, #rating-guide').show();   // Shadowing のときだけ
+                    // } else {
+                    //     $('.rating-container, #rating-guide').hide();   // Dictation のときは非表示
+                    // }
                 })
                 .catch(err => {
                     console.error("⚠️ fetchSentence error:", err);
@@ -942,6 +984,7 @@
     }
 
     async function startAiIntro() {
+
         // 0) UI 側の準備
         $('#ai-record').prop('disabled', true);   // 録音まだ禁止
         appendChat('assistant', '⏳ ちょっと待ってね…');

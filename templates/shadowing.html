@@ -351,6 +351,7 @@
     let aiChunks = [];
     let needJpHelp   = false;      // ← Phase1 以降用フラグ
     let aiIntroDone = false;
+    let lastAiScore = null;
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function updateVisibility() {
@@ -379,6 +380,18 @@
     function enterDictationMode() {
         isDictation = true;
         updateVisibility();
+    }
+
+    function chooseMime() {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+            return 'audio/webm;codecs=opus';   // デスクトップ / Android の高音質
+        if (MediaRecorder.isTypeSupported('audio/webm'))
+            return 'audio/webm';               // 一部 Android
+        if (MediaRecorder.isTypeSupported('audio/mp4'))
+            return 'audio/mp4';                // iOS Safari / Chrome
+        if (MediaRecorder.isTypeSupported('audio/wav'))
+            return 'audio/wav';                // 最終手段
+        return '';                             // ブラウザ任せ
     }
 
     $(document).ready(async function() {
@@ -700,10 +713,15 @@
         });
 
 // ① 録音開始
-        $('#ai-record').on('click', () => {
-            startAiRec();                                  // ← 新版の recorder
-            $('#ai-record').prop('disabled', true);
-            $('#ai-stop').prop('disabled', false);
+        $('#ai-record').on('click', async () => {
+            try {
+                await startAiRec();                       // ① ここで録音開始
+                $('#ai-record').prop('disabled', true);   // UI 切替
+                $('#ai-stop').prop('disabled', false);
+            } catch (err) {
+                console.error('startAiRec error', err);   // ② 失敗ログ
+                alert('🎙️ 録音を開始できませんでした。この端末/ブラウザでは未対応か、マイク権限が拒否されています。');
+            }
         });
 
         // ② 録音停止 → STT → /api/ai_chat へ送信
@@ -750,6 +768,7 @@
                     .get(0).play();
 
             aiHistory = chatJson.new_history;              // ローカル履歴更新
+            lastAiScore = chatJson.score ?? null; // ★ ここを追加
         });
 
         /* ======== ミニ util =================================== */
@@ -768,9 +787,12 @@
             if (!audioStream) {
                 audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
             }
-            aiMediaRec = new MediaRecorder(audioStream, {mimeType: 'audio/webm;codecs=opus'});
+            const mime = chooseMime();
+            aiMediaRec = mime ? new MediaRecorder(audioStream, {mimeType: mime})
+                    : new MediaRecorder(audioStream);
+
             aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
-            aiMediaRec.start();
+            aiMediaRec.start(1000);
 
             $('#ai-recording-indicator').show();
         }
@@ -787,6 +809,21 @@
 
         /* ===== 1. ➡︎ ボタンを押したら次の語句へ ===== */
         $('#ai-next').on('click', async function () {
+
+            /* ★ 1) 直前スコアを DB へ送信 ------------------------ */
+            if (lastAiScore !== null && currentVocabId) {
+                const f = new FormData();
+                f.append('vocab_id', currentVocabId);
+                f.append('self_score', lastAiScore);
+
+                try {
+                    await fetch('/submit_practice', {method: 'POST', body: f});
+                } catch (e) {
+                    console.error('submit_practice error', e);
+                    // 失敗しても学習は止めない
+                }
+            }
+            lastAiScore = null;           // ★ リセット
 
             /* ① チャット画面と履歴をリセット */
             $('#chat-window').empty();

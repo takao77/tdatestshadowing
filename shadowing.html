@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadowing Practice</title>
+  <!-- FontAwesome for Icons -->
+    <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css"
+            integrity="sha512-..."
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+    />
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #1e1e1e;
+      color: white;
+      font-family: 'Raleway', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      background: rgba(40, 40, 40, 0.8);
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+      width: 90%;
+      text-align: center;
+      position: relative;
+    }
+    h1 {
+      font-size: 1.2rem;
+      margin-bottom: 20px;
+    }
+    .tab {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 30px;
+    }
+    .tab button {
+      background: none;
+      border: none;
+      font-size: 1rem;
+      color: #888;
+      cursor: pointer;
+      padding: 10px;
+      transition: color 0.3s, border-bottom 0.3s;
+    }
+    .tab button.active {
+      color: white;
+      border-bottom: 2px solid #1abc9c;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .icon-btn {
+      font-size: 50px;
+      color: #3498db;
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, color 0.3s;
+    }
+    .icon-btn:hover {
+      transform: scale(1.1);
+      color: #5dade2;
+    }
+    .icon-btn.red {
+      color: #e74c3c;
+    }
+    .icon-btn.red:hover {
+      color: #f1948a;
+    }
+    .icon-btn.green {
+      color: #2ecc71;
+    }
+    .icon-btn.green:hover {
+      color: #58d68d;
+    }
+    .icon-container {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      margin-top: 40px;
+    }
+    audio {
+      display: block;
+      margin: 20px auto;
+    }
+    #assessment-result {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 18px;
+    }
+    .logout-btn {
+      background-color: #7f8c8d;
+      padding: 10px 20px;
+      border-radius: 8px;
+      color: white;
+      text-decoration: none;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      transition: background-color 0.3s;
+    }
+    .logout-btn:hover {
+      background-color: #95a5a6;
+    }
+    /* Styles for the Next Button */
+    .next-button-container {
+      margin-top: 30px;
+      display: flex;
+      justify-content: center;
+    }
+    .icon-btn.blue {
+      font-size: 50px;
+      color: #3498db; /* Blue color */
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, color 0.3s;
+    }
+    .icon-btn.blue:hover {
+      transform: scale(1.1);
+      color: #5dade2;
+    }
+
+    /* 左上に配置するモダンな“家”アイコン */
+    .home-link {
+        position: absolute;
+        top: 15px;
+        left: 20px;
+        color: #fff;
+        font-size: 30px; /* アイコンの大きさ */
+        text-decoration: none;
+        transition: color 0.3s, transform 0.3s;
+    }
+
+    .home-link:hover {
+      color: #3498db;      /* ホバー時に青色へ */
+      transform: scale(1.1);
+    }
+
+    .rating-btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .rating-btn:hover {
+      background: #2980b9;
+      transform: scale(1.1);
+    }
+    .home-link,
+    .logout-btn {
+        z-index: 1000; /* ← 充分に大きければ OK */
+    }
+    @media (max-width:600px){
+      body{
+          align-items:flex-start;   /* カードを上寄せに */
+          padding-top:70px;         /* 上に余白を確保 */
+      }
+      .container{
+          width:100%;
+          height:calc(100vh - 100px);
+          overflow-y:auto;          /* はみ出せばスクロール */
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 左上の“家”アイコン (chimney-window付き) -->
+<a href="/home" class="home-link">
+    <i class="fa-solid fa-house-chimney-window"></i>
+</a>
+
+<a href="/logout" class="logout-btn">Logout</a>
+
+  <div class="container">
+    <h1 id="dynamic-sentence">Loading sentence...</h1> <!-- Dynamic sentence will be populated here -->
+
+    <!-- Tabs for Practice Mode and Record Mode -->
+    <div class="tab">
+      <button class="active" onclick="showTab(event,'ai')">AI&nbsp;モード</button>
+        <button onclick="showTab(event, 'practice')">練習モード</button>
+        <button onclick="showTab(event, 'explanation')">解説モード</button>
+        <button onclick="showTab(event, 'record')">録音モード</button>
+    </div>
+
+    <!-- Tab Content -->
+    <div id="practice" class="tab-content active">
+      <button id="practice-btn" class="icon-btn">
+        <i class="fas fa-play"></i>
+      </button>
+      <audio id="practice-audio" controls></audio>
+    </div>
+
+<!--?    <div class="icon-container" style="justify-content: center; margin-bottom: 10px;">-->
+<!--?      <button id="dictation-play-btn" class="icon-btn">-->
+<!--?        <i class="fas fa-play"></i>-->
+<!--?      </button>-->
+<!--?    </div>-->
+<!--?    <audio id="dictation-audio" controls style="display: none; margin: 0 auto 10px;"></audio>-->
+
+      <!-- ★ ここからディクテーション用 UI を追加 -->
+      <div id="dictation-container" style="display: none; margin-top: 20px;">
+          <!-- Dictation 用再生ボタン -->
+          <div class="icon-container" style="justify-content: center; margin-bottom: 10px;">
+              <button id="dictation-play-btn" class="icon-btn">
+                  <i class="fas fa-play"></i>
+              </button>
+          </div>
+          <!-- Dictation 用オーディオ -->
+          <audio id="dictation-audio" controls style="margin: 0 auto 10px;"></audio>
+          <!-- ユーザーが聴いた英文を入力するテキストフィールド -->
+          <input
+                  id="dictation-input"
+                  type="text"
+                  placeholder="ここに学習した単語のみ入力してください"
+                  style="width: 100%; padding: 8px; font-size: 1rem; border-radius: 4px; border: none;"
+          />
+          <!-- 入力後に正誤判定を行うボタン -->
+          <button
+                  id="dictation-submit"
+                  style="margin-top: 10px; padding: 8px 16px; font-size: 1rem; border-radius: 4px; background: #1abc9c; color: white; border: none; cursor: pointer;"
+          >
+              確認
+          </button>
+          <!-- 判定結果を表示する場所 -->
+          <p id="dictation-feedback" style="margin-top:10px; font-size:1rem;"></p>
+          <!-- 次に進む矢印ボタン（正解・不正解後に表示） -->
+          <div class="next-button-container" style="margin-top: 20px;">
+              <button id="dictation-next" class="icon-btn blue" style="display: none;">
+                  <i class="fas fa-arrow-right"></i>
+              </button>
+          </div>
+      </div>
+
+      <!-- ★ 解説モード -->
+      <div id="explanation" class="tab-content">
+          <!-- Word を表示する要素 -->
+          <p style="display: none;" id="explanation-word-wrap">
+              <strong>Word:</strong> <span id="explanation-word"></span>
+          </p>
+          <!-- 解説を取得するボタン -->
+          <button id="explain-btn" style="font-size:1rem; padding:10px;">
+              解説を見る
+          </button>
+          <!-- 2) 查看解释（中文用）-->
+          <button id="explain-btn-cn" style="font-size:1rem; padding:10px; margin-left:10px;">
+              查看解释
+          </button>
+          <!-- Azure OpenAI で生成した説明を入れる場所 -->
+          <div id="explanation-content" style="margin-top:20px; text-align:left; white-space:pre-wrap;"></div>
+      </div>
+
+    <div id="record" class="tab-content">
+      <div class="icon-container">
+        <button id="record-play-btn" class="icon-btn">
+          <i class="fas fa-microphone"></i>
+        </button>
+        <button id="stop-record-btn" class="icon-btn red" disabled>
+          <i class="fas fa-stop"></i>
+        </button>
+      </div>
+
+      <audio id="record-audio" controls></audio>
+      <h2 style="display: flex; justify-content: center; align-items: center; font-size: 20px; margin-top: 20px;">
+        <i class="fas fa-headphones-alt" style="margin-right: 10px;"></i> Check Your Voice
+      </h2>
+      <audio id="user-recorded-audio" controls></audio>
+
+      <button id="assess-btn" class="icon-btn green">
+        <i class="fas fa-robot"></i><span style="font-size: 18px; margin-left: 10px;">AI添削</span>
+      </button>
+      <div id="assessment-result"></div>
+    </div>
+
+    <p id="rating-guide"
+     style="text-align:center; margin-top:25px; font-size:1rem; opacity:.8; display:none;">
+      Please rate your confidence for this item.<br>
+      この問題の習得度を自己評価してください。
+    </p>
+
+    <!-- 自己評価ボタン -->
+    <div class="rating-container"
+       style="margin-top:10px; display:flex; justify-content:center; gap:10px;">
+      <button class="rating-btn" data-score="1"
+              title="I barely remember this. / ほとんど覚えていない">1
+      </button>
+      <button class="rating-btn" data-score="2"
+              title="I remember parts, but make many mistakes. / まだ間違いが多い">2
+      </button>
+      <button class="rating-btn" data-score="3"
+              title="I can recall it with some effort. / 思い出すのに少し時間がかかる">3
+      </button>
+      <button class="rating-btn" data-score="4"
+              title="I recall it easily, with minor hesitation. / ほぼ覚えた">4
+      </button>
+      <button class="rating-btn" data-score="5"
+              title="I've completely mastered this! / 完璧に覚えた">5
+      </button>
+    </div>
+
+    <div id="ai" class="tab-content">
+      <div id="chat-window" style="height:260px; overflow-y:auto; background:#222;
+           padding:10px; border-radius:8px; text-align:left; font-size:.9rem;"></div>
+
+        <p id="ai-recording-indicator"
+           style="display:none; color:#e74c3c; font-weight:600; margin:6px 0;">
+            <i class="fas fa-circle-notch fa-spin"></i>&nbsp;Recording…
+        </p>
+
+      <!-- AI 音声を再生 -->
+      <audio id="ai-audio" style="width:100%; margin-top:8px;" controls></audio>
+
+      <!-- 録音して送信 -->
+      <div class="icon-container" style="justify-content:center; margin-top:12px;">
+          <button id="ai-record"  class="icon-btn" title="録音開始 Start Record"><i class="fas fa-microphone"></i></button>
+          <button id="ai-stop"    class="icon-btn red" title="録音停止 Stop Record" disabled><i class="fas fa-stop"></i></button>
+            <button id="sakura-btn" class="icon-btn green" title="日本語解説　さくら先生">🌸
+    </button>
+      </div>
+        <div class="next-button-container" style="margin-top:18px;">
+            <button id="ai-next" class="icon-btn blue">
+            <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+  </div>
+
+  <!-- jQuery and Bootstrap JS -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+
+  <script>
+    let mediaRecorder;
+    let recordedChunks = [];
+    let savedAudioPath = null;  // Store the path of the saved audio
+    let audioStream; // Store the audio stream for reuse
+    let currentVocabId = null;
+    let currentWord = null;
+    let currentSentence = null;
+    let currentEF         = null;
+    let isDictation = false;
+
+    /* === AI 用 === */
+    let targetWords  = [];   // [{vocab_id,word,sentence,ef}]
+    let curIndex     = 0;    // 0-2 をループ
+    let aiHistory    = [];   // {role,text} を最大10
+    let aiMediaRec;              // MediaRecorder
+    let aiChunks = [];
+    let needJpHelp   = false;      // ← Phase1 以降用フラグ
+    let aiIntroDone = false;
+    let lastAiScore = null;
+
+    /* === 1) まずグローバル関数を宣言 ========================= */
+    function updateVisibility() {
+        const practice = $('#practice').hasClass('active');
+        const ai = $('#ai').hasClass('active');
+        const dictation = practice && isDictation;
+
+        // ① 例文
+        $('#dynamic-sentence').toggle(!dictation);
+
+        // ② 自己評価
+        $('.rating-container, #rating-guide').toggle(practice && !dictation);
+
+        // ③ dictation containerはDictationのときのみ
+        $('#dictation-container').toggle(dictation);
+
+        /* ★ ④ Shadowing 用 UI（practice-btn / audio）*/
+        $('#practice-btn, #practice-audio').toggle(practice && !dictation);
+    }
+
+    function enterShadowMode() {
+        isDictation = false;
+        updateVisibility();
+    }
+
+    function enterDictationMode() {
+        isDictation = true;
+        updateVisibility();
+    }
+
+    function chooseMime() {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+            return 'audio/webm;codecs=opus';   // デスクトップ / Android の高音質
+        if (MediaRecorder.isTypeSupported('audio/webm'))
+            return 'audio/webm';               // 一部 Android
+        if (MediaRecorder.isTypeSupported('audio/mp4'))
+            return 'audio/mp4';                // iOS Safari / Chrome
+        if (MediaRecorder.isTypeSupported('audio/wav'))
+            return 'audio/wav';                // 最終手段
+        return '';                             // ブラウザ任せ
+    }
+
+    async function ensureMicAlive() {
+      const track = audioStream.getAudioTracks()[0];
+
+      track.addEventListener('ended', () => {
+        console.warn('Mic track ended - reacquiring…');
+        reacquireMic();
+      });
+
+      track.addEventListener('mute',  () => {
+        console.warn('Mic muted');
+        // 必要なら UI に表示
+      });
+      track.addEventListener('unmute', () => console.log('Mic unmuted'));
+    }
+
+    async function reacquireMic() {
+      try {
+        audioStream.getTracks().forEach(t => t.stop());  // 古い stream を破棄
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+        ensureMicAlive();            // 再帰的に監視を張り直す
+      } catch(e) {
+        console.error('Mic reacquire failed', e);
+        alert('🎙️ マイクが無効になりました。設定を確認してもう一度お試しください。');
+      }
+    }
+
+    function setMicStatus(ok) {
+      $('#ai-recording-indicator')
+          .css('color', ok ? '#e74c3c' : '#7f8c8d')
+          .html(ok ? '<i class="fas fa-circle-notch fa-spin"></i> Recording…'
+                    : 'Mic disconnected – tap to retry');
+    }
+
+    $(document).ready(async function() {
+        const course = "{{ course }}";  // Get the course passed from the backend
+
+        // Request microphone access once and store the stream
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          console.log('Microphone access granted.');
+        } catch (error) {
+          console.error('Error accessing microphone:', error);
+          alert('Microphone access denied or unavailable.');
+        }
+
+        await fetchSentence();
+
+        $('.rating-btn').on('click', async function () {
+            const score = $(this).data('score');
+            const form = new FormData();
+            form.append('vocab_id', currentVocabId);
+            form.append('self_score', score);
+
+            try {
+                const res = await fetch('/submit_practice', {method: 'POST', body: form});
+                const json = await res.json();
+                if (json.error) {
+                    alert('送信エラー: ' + json.error);
+                    return;
+                }
+
+                // ここで新しい EF 値をキャッチしておく
+                currentEF = json.ef;
+
+                // 次の問題をロード
+                loadNextPracticeItem();
+            } catch (err) {
+                console.error(err);
+                alert('送信失敗: ' + err);
+            }
+        });
+
+        // --- (C) 次の問題読み込み＆モード切替 ---
+        function loadNextPracticeItem() {
+            // 1) dictationAnswered フラグをリセット
+                dictationAnswered = false;
+            // 2) 「確認」ボタンを有効化
+                $('#dictation-submit').prop('disabled', false);
+            // 3) 入力欄とフィードバックもクリア
+                $('#dictation-input').val('');
+                $('#dictation-feedback').text('');
+                $('#dictation-next').hide();
+
+                $('#dictation-audio').attr('src', '').hide();
+
+                const pAudio = $('#practice-audio').get(0);
+                if (pAudio) {
+                    pAudio.pause();
+                    pAudio.currentTime = 0;
+                }
+
+                $('#practice-audio').attr('src', '');
+
+                fetchSentence();
+        }
+
+        // ── (E) Dictation: 「確認」ボタンのクリックハンドラ ──
+        let dictationAnswered = false;  // ← 追加
+
+        $('#dictation-submit').on('click', async function() {
+            if (dictationAnswered) return;    // すでに一度押されたら何もしない
+            dictationAnswered = true;         // フラグを立てる
+            $(this).prop('disabled', true);   // ボタンを無効化
+
+            const userInput = $('#dictation-input').val().trim();
+          // 1) 英文と回答を正規化：空白・句読点を除去、小文字化
+          const normalize = str => str.replace(/[^\w\s]|_/g, "").toLowerCase();
+          const normalizedInput  = normalize(userInput);
+          const normalizedAnswer = normalize(currentWord);
+
+          // 2) 正誤判定
+          const isCorrect = normalizedInput === normalizedAnswer;
+
+          // 3) 自己評価を送信 (5点 or 3点)
+          try {
+            const form = new FormData();
+            form.append('vocab_id',    currentVocabId);
+            form.append('self_score',  isCorrect ? 5 : 2);
+            await fetch('/submit_practice', { method:'POST', body: form });
+          } catch(err) {
+            console.error('dictation submit error', err);
+          }
+
+          // 4) フィードバック表示
+          if (isCorrect) {
+            $('#dictation-feedback').text('✅ 正解です！');
+          } else {
+            $('#dictation-feedback').html(
+              '❌ 不正解… 正しい文はこちらです：<br>' +
+              currentSentence
+            );
+          }
+
+          // 5) 「次へ」ボタンを出す
+          $('#dictation-next').show();
+        });
+
+        // ── (F) Dictation: 次へボタンのクリックハンドラ ──
+        $('#dictation-next').on('click', function() {
+          // リセット
+          $('#dictation-input').val('');
+          $('#dictation-feedback').text('');
+          $('#dictation-next').hide();
+          // 次の問題へ
+          loadNextPracticeItem();
+        });
+
+        // ── (G) Dictation: audio play ボタン ──
+        $('#dictation-play-btn').off('click').on('click', async function() {
+          if (!currentSentence) return;  // safety
+
+          // 1) ツールに投げるフォームを作る
+          const form = new FormData();
+          form.append('sentence', currentSentence);
+
+          try {
+            // 2) サーバーで speech audio を生成
+            const resp = await fetch('/generate_shadow_audio', { method:'POST', body: form });
+            const data = await resp.json();
+            if (data.error) throw data.error;
+
+            // 3) audio タグにセットして再生
+            const audioEl = $('#dictation-audio');
+            audioEl.attr('src', 'data:audio/mp3;base64,' + data.audio);
+            audioEl.show()[0].play();
+          } catch(err) {
+            console.error('Dictation audio error:', err);
+            alert('音声の取得に失敗しました: ' + err);
+          }
+        });
+
+        // Practice Mode: Play Azure Speech Audio 5 times
+        $('#practice-btn').on('click', function() {
+          const sentence = $('#dynamic-sentence').text();  // Use the dynamic sentence
+          const formData = new FormData();
+          formData.append('sentence', sentence);
+          formData.append('mode', 'practice');  // Indicate Practice Mode
+
+          fetch('/generate_shadow_audio', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.error) {
+              alert('Error: ' + data.error);
+            } else {
+              const audioPlayer = $('#practice-audio');
+              // Ensure user interaction triggers playback
+              audioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
+              audioPlayer[0].play().catch(error => {
+                console.error('Playback failed:', error);
+              });
+            }
+          })
+          .catch(error => console.error('Error fetching shadow audio:', error));
+        });
+
+        // Record Mode: Start recording user's voice
+        $('#record-play-btn').on('click', function() {
+          const sentence = $('#dynamic-sentence').text();
+          const formData = new FormData();
+          formData.append('sentence', sentence);
+          formData.append('mode', 'record');
+
+          fetch('/generate_shadow_audio', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.error) {
+              alert('Error: ' + data.error);
+            } else {
+              const azureAudioPlayer = $('#record-audio');
+              azureAudioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
+              azureAudioPlayer[0].play().catch(error => {
+                console.error('Playback failed:', error);
+              });
+
+              // Start recording user's voice when the audio starts playing
+              azureAudioPlayer[0].onplay = function() {
+                startRecording();
+                $('#stop-record-btn').prop('disabled', false);
+              };
+            }
+          })
+          .catch(error => console.error('Error fetching shadow audio:', error));
+        });
+
+        // Stop recording and save the audio to the backend
+        $('#stop-record-btn').on('click', function() {
+          stopRecording();
+        });
+
+        // Function to start recording with WebRTC
+        function startRecording() {
+          if (!audioStream) {
+            alert('Microphone is not available.');
+            return;
+          }
+
+          mediaRecorder = new MediaRecorder(audioStream);
+
+          recordedChunks = []; // Clear previous recordings
+
+          mediaRecorder.ondataavailable = function(event) {
+            if (event.data.size > 0) {
+              recordedChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.start();
+          console.log('Recording started...');
+        }
+
+        // Function to stop recording and handle the recorded audio
+        function stopRecording() {
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            mediaRecorder.stop();
+            console.log('Recording stopped.');
+
+            mediaRecorder.onstop = function() {
+              const blob = new Blob(recordedChunks, { type: 'audio/wav' });
+              const formData = new FormData();
+              formData.append('audio_data', blob, 'user_recording.wav');
+
+              fetch('/save_recording', {
+                method: 'POST',
+                body: formData
+              })
+              .then(response => response.json())
+              .then(data => {
+                if (data.success) {
+                  // alert('Audio saved successfully!');
+                  savedAudioPath = data.audio_path;  // Ensure savedAudioPath is correctly updated
+                  const recordedAudioURL = URL.createObjectURL(blob);
+                  $('#user-recorded-audio').attr('src', recordedAudioURL);
+                  $('#user-recorded-audio')[0].play();
+                } else {
+                  alert('Error: ' + data.error);
+                }
+              })
+              .catch(error => console.error('Error saving audio:', error));
+            };
+
+            $('#stop-record-btn').prop('disabled', true);
+          }
+        }
+
+        // Assess Pronunciation when the "AI 添削" button is clicked
+        $('#assess-btn').on('click', function() {
+          if (!savedAudioPath) {
+            alert('Please record and save your audio first.');
+            return;
+          }
+
+          const sentence = $('#dynamic-sentence').text();
+          const formData = new FormData();
+          formData.append('audio_path', savedAudioPath);  // Use the path of the saved audio
+          formData.append('sentence', sentence);
+
+          // Send the request to the server for pronunciation assessment
+          fetch('/assess_pronunciation', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              const result = data.result;
+              $('#assessment-result').html(`
+                <p><strong>Pronunciation Score:</strong> ${result.pronunciationScore}</p>
+                <p><strong>Accuracy:</strong> ${result.accuracyScore}</p>
+                <p><strong>Fluency:</strong> ${result.fluencyScore}</p>
+                <p><strong>Completeness:</strong> ${result.completenessScore}</p>
+              `);
+            } else {
+              $('#assessment-result').text('Error: ' + data.error);
+            }
+          })
+          .catch(error => console.error('Error assessing pronunciation:', error));
+        });
+
+        // Re-request permissions if device changes (e.g., earphones plugged/unplugged)
+        navigator.mediaDevices.ondevicechange = function(event) {
+          console.log('Device changed:', event);
+          // Stop current recorder
+          if (mediaRecorder && mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+          }
+          // Re-request microphone access
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(function(stream) {
+              audioStream = stream;
+              console.log('Switched to new audio input device');
+            }).catch(function(error) {
+              console.error('Error re-acquiring microphone:', error);
+            });
+        };
+// ★ [1] 「解説を見る」ボタンのクリックイベントを紐づけ
+        $('#explain-btn').on('click', function () {
+            const sentence = $('#dynamic-sentence').text();
+            explainSentence(sentence);
+        });
+// ★ (2) 「查看解释」ボタン（中国語）
+        $('#explain-btn-cn').on('click', function () {
+            const sentence = $('#dynamic-sentence').text();
+            explainSentenceChinese(sentence);  // 中国語向け関数を呼ぶ
+        });
+
+// ① 録音開始
+        $('#ai-record').on('click', async () => {
+            try {
+                await startAiRec();                       // ① ここで録音開始
+                $('#ai-record').prop('disabled', true);   // UI 切替
+                $('#ai-stop').prop('disabled', false);
+            } catch (err) {
+                console.error('startAiRec error', err);   // ② 失敗ログ
+                alert('🎙️ 録音を開始できませんでした。この端末/ブラウザでは未対応か、マイク権限が拒否されています。');
+            }
+        });
+
+        // ② 録音停止 → STT → /api/ai_chat へ送信
+        $('#ai-stop').on('click', async () => {
+            const blob = await stopAiRec();                // ← 新版の stop
+            $('#ai-stop').prop('disabled', true);
+            $('#ai-record').prop('disabled', false);
+
+            /* 1) STT -------------------------------------------- */
+            const f = new FormData();
+            f.append('audio', blob, 'u.webm');
+            f.append('target_word',     currentWord);
+            f.append('target_sentence', currentSentence);
+            const sttRes = await fetch('/api/stt_to_text_speech', {method: 'POST', body: f});
+            const sttJson = await sttRes.json();
+            const userText = (sttJson.text || '').trim();
+
+            if (!userText) {                               // 認識失敗ガード
+                appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
+                return;
+            }
+            appendChat('user', userText);
+
+            /* ---------- (3) AI へ投げる JSON を修正 ---------- */
+            const payload = {
+                user_text: userText,        // ユーザーの発話文字列
+                history: aiHistory,       // 直近の会話履歴 (最大10件)
+                target_word: currentWord,     // 練習モードで出ている単語
+                target_sentence: currentSentence,// ★ 追加：例文も渡す
+                vocab_id: currentVocabId,  // その単語の DB ID
+                need_jp_help: needJpHelp       // JP ヘルプを出すかどうか（将来用）
+            };
+
+            const chatRes = await fetch('/api/ai_chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const chatJson = await chatRes.json();
+
+            appendChat('assistant', chatJson.ai_text);
+            $('#ai-audio')
+                    .attr('src', 'data:audio/mp3;base64,' + chatJson.ai_audio)
+                    .get(0).play();
+
+            aiHistory = chatJson.new_history;              // ローカル履歴更新
+            lastAiScore = chatJson.score ?? null; // ★ ここを追加
+        });
+
+        $('#sakura-btn').on('click', async function () {
+
+            const payload = {
+                word: currentWord,
+                sentence: currentSentence
+            };
+
+            try {
+                const res = await fetch('/api/sakura', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const js = await res.json();
+                if (js.error) {
+                    alert(js.error);
+                    return;
+                }
+
+                appendChat('assistant', js.text, 'sakura');                       // 文字も表示
+                $('#ai-audio')
+                        .attr('src', 'data:audio/mp3;base64,' + js.audio)
+                        .get(0).play();
+
+            } catch (err) {
+                console.error(err);
+                alert('さくら先生を呼び出せませんでした。');
+            }
+        });
+
+        /* ======== ミニ util =================================== */
+        function appendChat(role, text, speaker = 'default') {
+
+            /* --- アイコン表 --- */
+            const icons = {
+                user: '🧑',
+                assistant: speaker === 'sakura' ? '🌸' : '🤖'   // ← ここを 🌸 に
+            };
+
+            $('#chat-window')
+                    .append(`<p><b>${icons[role]}:</b> ${text}</p>`)
+                    .scrollTop(1e6);
+        }
+
+        /* ======== Recorder helpers =========================== */
+        let aiMediaRec, aiChunks = [];
+
+        async function startAiRec() {
+            aiChunks = [];
+            if (!audioStream) {
+                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+            }
+            /* ② 取得直後に監視をセット */
+            ensureMicAlive();
+
+            const mime = chooseMime();
+            aiMediaRec = mime ? new MediaRecorder(audioStream, {mimeType: mime})
+                    : new MediaRecorder(audioStream);
+
+            aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
+
+            try {
+                aiMediaRec.start();                 // 1 s チャンク
+            } catch (e) {
+                console.warn('timeslice unsupported, retry w/o timeslice', e);
+                aiMediaRec.start();                     // fallback
+            }
+
+            $('#ai-recording-indicator').show();
+        }
+
+        function stopAiRec() {
+            return new Promise(res => {
+                aiMediaRec.onstop = () => {
+                    $('#ai-recording-indicator').hide();
+                    res(new Blob(aiChunks, {type: 'audio/webm'}));
+                };
+                aiMediaRec.stop();
+            });
+        }
+
+        /* ===== 1. ➡︎ ボタンを押したら次の語句へ ===== */
+        $('#ai-next').on('click', async function () {
+
+            /* ★ 1) 直前スコアを DB へ送信 ------------------------ */
+            if (lastAiScore !== null && currentVocabId) {
+                const f = new FormData();
+                f.append('vocab_id', currentVocabId);
+                f.append('self_score', lastAiScore);
+
+                try {
+                    await fetch('/submit_practice', {method: 'POST', body: f});
+                } catch (e) {
+                    console.error('submit_practice error', e);
+                    // 失敗しても学習は止めない
+                }
+            }
+            lastAiScore = null;           // ★ リセット
+
+            /* ① チャット画面と履歴をリセット */
+            $('#chat-window').empty();
+            aiHistory = [];
+            aiIntroDone = false;     // ← Intro を再度走らせるため
+
+            /* ② 新しい語句を取得 */
+            await fetchNextAiItem(); // ⇦ ★ 新関数（下で定義）
+
+            /* ③ AI のイントロを再スタート */
+            startAiIntro();
+        });
+
+        /* ===== 2. AI 用に語句を取って来る関数 ===== */
+        async function fetchNextAiItem() {
+            try {
+                const course = "{{ course }}";                // Jinja から注入
+                const res = await fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`);
+                const js = await res.json();
+                if (js.error) throw js.error;
+
+                // 受け取った語句をグローバルに反映
+                currentSentence = js.sentence;
+                currentWord = js.word;
+                currentVocabId = js.vocab_id ?? null;        // DB 用 ID があれば
+                $('#dynamic-sentence').text(currentSentence);
+
+            } catch (e) {
+                console.error('fetchNextAiItem error:', e);
+                $('#dynamic-sentence').text('🚨 新しい語句の取得に失敗しました');
+            }
+        }
+
+        /* --- 追加 (C) 初期タブを AI に --- */
+        showTab({currentTarget: $('button[onclick*="ai"]')[0]}, 'ai');
+    });
+
+// ★ 新しく解説をfetchする関数
+    function explainSentence(sentence) {
+      const formData = new FormData();
+      formData.append('sentence', sentence);
+      formData.append('word', currentWord);
+
+      fetch('/generate_explanation', {
+        method: 'POST',
+        body: formData
+      })
+      .then(resp => resp.json())
+      .then(data => {
+        if (data.error) {
+          $('#explanation-content').text('Error: ' + data.error);
+        } else {
+          // 生成された説明文を表示
+          $('#explanation-content').text(data.explanation);
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        $('#explanation-content').text('Error: ' + err);
+      });
+    }
+
+    // 中国語版
+    function explainSentenceChinese(sentence) {
+        const formData = new FormData();
+        formData.append('sentence', sentence);
+        formData.append('word', currentWord);
+
+        fetch('/generate_explanation_cn', {  // 例: 別のAPIにする
+            method: 'POST',
+            body: formData
+        })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.error) {
+                        $('#explanation-content').text('Error: ' + data.error);
+                    } else {
+                        $('#explanation-content').text(data.explanation);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    $('#explanation-content').text('Error: ' + err);
+                });
+    }
+
+    // Function to switch between tabs
+    function showTab(event, tabName) {
+
+        /* ① すべてのタブコンテンツを非アクティブに */
+        document.querySelectorAll('.tab-content')
+                .forEach(tab => tab.classList.remove('active'));
+
+        /* ② クリックしたタブだけアクティブに */
+        document.getElementById(tabName).classList.add('active');
+
+        /* ③ ボタンのハイライト切替 */
+        document.querySelectorAll('.tab button')
+                .forEach(btn => btn.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+
+        /* ④ explanation タブだけ単語を表示 */
+        if (tabName === 'explanation') {
+            $('#explanation-word-wrap').show();
+            $('#explanation-word').text(currentWord);
+        } else {
+            $('#explanation-word-wrap').hide();
+        }
+
+        // const showRating = (tabName === 'practice' && !isDictation);
+        // $('.rating-container, #rating-guide').toggle(showRating);
+
+        /* ⑤ ★ AI タブでは文表示 */
+        if (tabName === 'ai') {
+            $('#dynamic-sentence').show();
+        }
+
+        if (tabName === 'ai' && !aiIntroDone) {
+            aiIntroDone = true;
+            startAiIntro();                 // ★ 新関数
+        }
+
+        updateVisibility();
+
+    }
+
+    // Function to fetch a new sentence and reset relevant elements
+    function fetchSentence() {
+        const course = "{{ course }}";
+        return fetch(`/api/get_due_vocab?course=${encodeURIComponent(course)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (!Array.isArray(data) || data.length === 0) {
+                        $('#dynamic-sentence').text('📚 練習すべき項目がありません');
+                        $('.rating-container').hide();
+                        return;
+                    }
+                    // 先頭のアイテムを取得
+                    const item = data[0];
+                    currentVocabId = item.vocab_id;
+                    currentSentence = item.sentence;
+                    currentWord = item.word;
+                    currentEF = item.ef ?? 2.0;
+
+                    // 画面に反映
+                    $('#dynamic-sentence').text(currentSentence);
+
+                    /* ---------- ② ★ ここで AI 用ターゲットも上書き ---------- */
+                    targetWords = [{
+                        vocab_id: currentVocabId,
+                        word: currentWord,
+                        sentence: currentSentence,
+                        ef: currentEF
+                    }];
+
+                    curIndex = 0;         // 念のためリセット
+
+                    // ★ EF に応じてモードを切替
+                    if (currentEF >= 3) enterDictationMode();
+                    else enterShadowMode();
+
+                    // if (!isDictation) {
+                    //     $('.rating-container, #rating-guide').show();   // Shadowing のときだけ
+                    // } else {
+                    //     $('.rating-container, #rating-guide').hide();   // Dictation のときは非表示
+                    // }
+                })
+                .catch(err => {
+                    console.error("⚠️ fetchSentence error:", err);
+                    $('#dynamic-sentence').text('🚨 読み込みエラー');
+                });
+    }
+
+    function appendChat(role, text) {
+        // ① アイコンを先に決めて…
+        const icon = role === 'user' ? '🧑' : '🤖';
+
+        // ② テンプレートの中はシンプルに
+        const line = `<p><b>${icon}:</b> ${text}</p>`;
+
+        $('#chat-window').append(line).scrollTop(9999);
+    }
+
+    /* ---------- (4) Today Target を 1 語だけ表示 ---------- */
+    function renderTargetList() {
+        // ❶ すでに表示されている行を削除
+        $('#chat-window .today-target').remove();
+        // fetchSentence() が走って currentWord が入っていない場合は何もしない
+        if (!currentWord) return;
+
+        // 先頭に挿入してスクロールは一番上に据え置き
+        $('#chat-window').prepend(
+                `<p><b>🎯 Today&nbsp;Target:</b> ${currentWord}</p>`
+        );
+    }
+
+    async function startAiIntro() {
+
+        // 0) UI 側の準備
+        $('#ai-record').prop('disabled', true);   // 録音まだ禁止
+        appendChat('assistant', '⏳ ちょっと待ってね…');
+
+        // 1) AI へ指示を組み立て
+        const sysMsg = `
+        Please explain the word "${currentWord}" in one short line,
+        then read the example sentence "${currentSentence}" slowly
+        and end with the phrase: "Your turn! Please repeat.".
+    `.trim();
+
+        // 2) back-end へ投げる
+        const res = await fetch('/api/ai_chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                user_text: sysMsg,
+                history: aiHistory           // ← 既存履歴を活用
+            })
+        });
+        const js = await res.json();
+
+        // 3) 画面反映 & 音声再生
+        $('#chat-window').children().last().remove();       // ⏳ 行を削除
+        appendChat('assistant', js.ai_text);
+        const audioEl = $('#ai-audio')
+                .attr('src', 'data:audio/mp3;base64,' + js.ai_audio)
+                .get(0);
+        audioEl.play();
+
+        // 4) 再生が終わったら録音解放
+        audioEl.onended = () => {
+            $('#ai-record').prop('disabled', false);
+        };
+
+        // 5) 履歴更新
+        aiHistory = js.new_history;
+    }
+
+
+  </script>
+
+</body>
+</html>

@@ -1638,57 +1638,43 @@ def stt_to_text():
 @app.route("/api/stt_to_text_speech", methods=["POST"])
 def stt_to_text_speech():
     """
-    WebM を受け取り Azure Speech で英語 STT。
-    target_word / target_sentence が渡って来たら Phrase List に加える
+    録音ファイルを **そのまま** gpt-4o-mini-transcribe へ転送し、
+    英語 (language=en) で認識結果を返す。
+    日本語などが返った場合は 400。
     """
     try:
-        # ---------- 受信 ----------
-        fs = request.files["audio"]                       # 録音 blob
-        tmp_webm = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
-        fs.save(tmp_webm.name)
+        fs      = request.files["audio"]
+        mime    = fs.mimetype or "application/octet-stream"
+        fname   = fs.filename or "speech_input"
 
-        # ---------- WebM → WAV ----------
-        wav_path = ensure_correct_wav_format(tmp_webm.name)
-
-        # ---------- Speech recognizer ----------
-        speech_cfg = speechsdk.SpeechConfig(
-            subscription=AZURE_SPEECH_API_KEY,
-            region=AZURE_SPEECH_REGION,
-            speech_recognition_language="en-US"
+        whisper_url = (
+            f"{AZURE_OPENAI_STT_ENDPOINT}/openai/deployments/"
+            f"{AZURE_OPENAI_STT_DEPLOY}/audio/transcriptions"
+            f"?api-version={STT_API_VER}"
         )
-        audio_cfg  = speechsdk.audio.AudioConfig(filename=wav_path)
-        recognizer = speechsdk.SpeechRecognizer(speech_cfg, audio_cfg)
 
-        # ---------- ★ Phrase List を動的に設定 ----------
-        t_word = request.form.get('target_word', '').strip()
-        t_sent = request.form.get('target_sentence', '').strip()
+        resp = requests.post(
+            whisper_url,
+            headers={"api-key": AZURE_OPENAI_STT_KEY},
+            files={"file": (fname, fs.stream, mime)},
+            data={
+                "response_format": "text",
+                "language": "en"          # ★ 英語モデルを強制
+            },
+            timeout=90
+        )
+        resp.raise_for_status()
+        text = resp.text.strip()
 
-        if t_word or t_sent:                # 何か来ていれば追加
-            plist = speechsdk.PhraseListGrammar.from_recognizer(recognizer)
-            if t_word:
-                plist.addPhrase(t_word)
-            if t_sent:
-                plist.addPhrase(t_sent)
+        # Whisper が空文字や "こんにちは" など返した場合に弾く
+        if not text or re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", text):
+            return jsonify({"error": "英語を話してくださいね！No English language is detected"}), 400
 
-        # ---------- STT ----------
-        result = recognizer.recognize_once()
-        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-            return jsonify({"text": result.text})
-        elif result.reason == speechsdk.ResultReason.NoMatch:
-            return jsonify({"text": ""})
-        else:
-            details = speechsdk.CancellationDetails.from_result(result)
-            return jsonify({"error": details.error_details}), 500
+        return jsonify({"text": text})
 
     except Exception as e:
         app.logger.exception(e)
         return jsonify({"error": str(e)}), 500
-    finally:
-        for p in (tmp_webm.name, wav_path):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
 
 
 @app.route("/api/ai_chat", methods=["POST"])

@@ -385,6 +385,8 @@
         const practice = $('#practice').hasClass('active');
         const ai = $('#ai').hasClass('active');
         const dictation = practice && isDictation;
+        const recordTab = $('#record').hasClass('active');   // ★ 追加
+
 
         // ① 例文
         $('#dynamic-sentence').toggle(!dictation);
@@ -398,16 +400,20 @@
         /* ★ ④ Shadowing 用 UI（practice-btn / audio）*/
         $('#practice-btn, #practice-audio').toggle(practice && !dictation);
 
-        if (dictation){        // Dictation (= practice タブ & isDictation=true)
+        if (dictation) {        // Dictation (= practice タブ & isDictation=true)
             $('#mode-guide').html(
-              'ディクテーション：例文を聞いて単語だけ入力しましょう'
+                    'ディクテーション：例文を聞いて単語だけ入力しましょう'
             );
-        }else if (practice){   // Shadowing (= practice タブ & isDictation=false)
+        } else if (practice) {   // Shadowing (= practice タブ & isDictation=false)
             $('#mode-guide').html(
-              ' ▶ を押して例文を５回シャドーイングしましょう'
+                    ' ▶ を押して例文を５回シャドーイングしましょう'
             );
-        }else{                 // AI / 解説 / 録音タブ
-            $('#mode-guide').text('');   // ガイド非表示
+        } else if (recordTab) {          // ★ ここを追加
+            $('#mode-guide').html(
+                    ''
+            );
+        } else {                        // AI / 解説
+            $('#mode-guide').text('');
         }
     }
 

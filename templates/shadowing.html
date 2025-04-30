@@ -838,7 +838,7 @@
             f.append('target_sentence', currentSentence);
             const sttJson = await sttWhisperDirect(
                     blob,
-                    /iP(hone|ad|od)/.test(navigator.userAgent) ? 'speech.mp4' : 'speech.webm'
+                    /iP(hone|ad|od)/.test(navigator.userAgent) ? 'speech.m4a' : 'speech.webm'
             );
             if (sttJson.error) {
                 alert('STT Error: ' + sttJson.error);

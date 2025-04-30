@@ -1647,8 +1647,26 @@ def stt_to_text_speech():
         mime    = fs.mimetype or "application/octet-stream"
         fname   = fs.filename or "speech_input"
 
-        if mime == "audio/mp4" and fname.endswith(".mp4"):
-            fname = fname[:-3] + "m4a"  # mp4 → m4a へリネーム
+        # ------ ★ iOS (audio/mp4) をサーバで wav へ変換 -----------------
+        if mime == "audio/mp4":
+            try:
+                # ① Blob → AudioSegment
+                seg = AudioSegment.from_file(fs.stream, format="mp4")
+                # ② AudioSegment → WAV (16-kHz mono 16-bit)
+                buf = BytesIO()
+                seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
+                    .export(buf, format="wav")
+                buf.seek(0)
+                # ③ Whisper に渡すファイル一式を上書き
+                mime = "audio/wav"
+                fname = "speech.wav"
+                file_tuple = ("speech.wav", buf, mime)
+            except Exception as _:
+                # 変換失敗→そのまま mp4 で試みる（旧来挙動）
+                file_tuple = (fname, fs.stream, mime)
+        else:
+            file_tuple = (fname, fs.stream, mime)
+        # ---------------------------------------------------------------
 
         whisper_url = (
             f"{AZURE_OPENAI_STT_ENDPOINT}/openai/deployments/"

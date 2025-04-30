@@ -1775,6 +1775,44 @@ def ai_session_start():
     return jsonify({'words':rows,'user_level':level})
 
 
+@app.route('/api/sakura', methods=['POST'])
+def sakura_teacher():
+    data      = request.get_json(force=True)
+    word      = data.get('word','').strip()
+    sentence  = data.get('sentence','').strip()
+
+    prompt = f"""
+あなたは『さくら先生』というやさしい日本語教師です。
+Word: 「{word}」
+Sentence: 「{sentence}」
+
+1. 単語を小学生にも分かるように簡単に解説
+2. 例文の意味を解説
+3. 単語について頻繁に使われるCollocationsコロケーションをいくつか紹介
+4. 最後に相手を励ます短いメッセージ
+口調は親しみやすく、語尾に♡などは使わず自然体で。
+"""
+
+    gpt = chat_client.chat.completions.create(
+        model=CHAT_DEPLOY,
+        messages=[{"role":"system","content":prompt}],
+        temperature=0.7
+    )
+    jp_text = gpt.choices[0].message.content.strip()
+
+    # ——— TTS  (ja-JP-NanamiNeural + cheerful) ———
+    access = get_access_token()
+    audio  = generate_speech(
+        text = jp_text,
+        access_token = access,
+        language_code="ja-JP",
+        voice_name="ja-JP-NanamiNeural",
+        style="cheerful"          # gentle & 明るい
+    )
+    b64 = base64.b64encode(audio).decode('utf-8')
+    return jsonify({'text': jp_text, 'audio': b64})
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

@@ -483,7 +483,13 @@
 
         // Request microphone access once and store the stream
         try {
-          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,   // ★ AEC
+                    noiseSuppression: true,   // ★ NS
+                    autoGainControl: true    // ★ AGC （端末依存）
+                }
+            });
           console.log('Microphone access granted.');
         } catch (error) {
           console.error('Error accessing microphone:', error);
@@ -644,35 +650,40 @@
         });
 
         // Record Mode: Start recording user's voice
-        $('#record-play-btn').on('click', function() {
-          const sentence = $('#dynamic-sentence').text();
-          const formData = new FormData();
-          formData.append('sentence', sentence);
-          formData.append('mode', 'record');
+        $('#record-play-btn').on('click', async function () {
+            const sentence = $('#dynamic-sentence').text();
+            const formData = new FormData();
+            formData.append('sentence', sentence);
+            formData.append('mode', 'record');
 
-          fetch('/generate_shadow_audio', {
-            method: 'POST',
-            body: formData
-          })
-          .then(response => response.json())
-          .then(data => {
-            if (data.error) {
-              alert('Error: ' + data.error);
-            } else {
-              const azureAudioPlayer = $('#record-audio');
-              azureAudioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
-              azureAudioPlayer[0].play().catch(error => {
-                console.error('Playback failed:', error);
-              });
+            const data = await fetch('/generate_shadow_audio', {method: 'POST', body: formData})
+                    .then(r => r.json());
 
-              // Start recording user's voice when the audio starts playing
-              azureAudioPlayer[0].onplay = function() {
-                startRecording();
-                $('#stop-record-btn').prop('disabled', false);
-              };
+            /* === ここは録音モード専用の <audio> === */
+            const audioEl = $('#record-audio')
+                    .attr('src', 'data:audio/mp3;base64,' + data.audio)
+                    .get(0);
+
+            /* ▼▼▼ イヤホン固定はこの 7 行だけ ▼▼▼ */
+            if (audioEl.setSinkId) {                       // Chrome デスクトップのみ
+                const outs = await navigator.mediaDevices.enumerateDevices();
+                const hp = outs.find(d => d.kind === 'audiooutput'
+                        && /headphone/i.test(d.label));
+                if (hp) {
+                    try {
+                        await audioEl.setSinkId(hp.deviceId);
+                    } catch (e) {
+                        console.warn('setSinkId failed', e);
+                    }
+                }
             }
-          })
-          .catch(error => console.error('Error fetching shadow audio:', error));
+            /* ▲▲▲ これで「録音モード再生時のみ」イヤホン強制 ▲▲▲ */
+
+            audioEl.onplay = async () => {
+                await startRecording();                    // ← AI 再生と同時録音
+                $('#stop-record-btn').prop('disabled', false);
+            };
+            audioEl.play();
         });
 
         // Stop recording and save the audio to the backend

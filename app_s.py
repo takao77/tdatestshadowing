@@ -1647,6 +1647,9 @@ def stt_to_text_speech():
         mime    = fs.mimetype or "application/octet-stream"
         fname   = fs.filename or "speech_input"
 
+        if mime == "audio/mp4" and fname.endswith(".mp4"):
+            fname = fname[:-3] + "m4a"  # mp4 → m4a へリネーム
+
         whisper_url = (
             f"{AZURE_OPENAI_STT_ENDPOINT}/openai/deployments/"
             f"{AZURE_OPENAI_STT_DEPLOY}/audio/transcriptions"

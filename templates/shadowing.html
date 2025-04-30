@@ -181,6 +181,12 @@
           overflow-y:auto;          /* はみ出せばスクロール */
       }
     }
+    #mode-guide{
+      margin:18px 0 0;
+      font-size:.95rem;
+      line-height:1.4;
+      opacity:.85;
+    }
   </style>
 </head>
 <body>
@@ -194,11 +200,15 @@
 
   <div class="container">
     <h1 id="dynamic-sentence">Loading sentence...</h1> <!-- Dynamic sentence will be populated here -->
+    <p id="mode-guide"
+       style="margin:18px 0 0; font-size:.95rem; line-height:1.4; opacity:.85;">
+      <!-- JS が内容を書き替えます -->
+    </p>
 
     <!-- Tabs for Practice Mode and Record Mode -->
     <div class="tab">
-      <button class="active" onclick="showTab(event,'ai')">AI&nbsp;モード</button>
-        <button onclick="showTab(event, 'practice')">練習モード</button>
+        <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
+        <button onclick="showTab(event,'ai')">AI&nbsp;モード</button>
         <button onclick="showTab(event, 'explanation')">解説モード</button>
         <button onclick="showTab(event, 'record')">録音モード</button>
     </div>
@@ -387,6 +397,18 @@
 
         /* ★ ④ Shadowing 用 UI（practice-btn / audio）*/
         $('#practice-btn, #practice-audio').toggle(practice && !dictation);
+
+        if (dictation){        // Dictation (= practice タブ & isDictation=true)
+            $('#mode-guide').html(
+              'ディクテーション：例文を聞いて単語だけ入力しましょう'
+            );
+        }else if (practice){   // Shadowing (= practice タブ & isDictation=false)
+            $('#mode-guide').html(
+              ' ▶ を押して例文を５回シャドーイングしましょう'
+            );
+        }else{                 // AI / 解説 / 録音タブ
+            $('#mode-guide').text('');   // ガイド非表示
+        }
     }
 
     function enterShadowMode() {
@@ -409,6 +431,18 @@
         if (MediaRecorder.isTypeSupported('audio/wav'))
             return 'audio/wav';                // 最終手段
         return '';                             // ブラウザ任せ
+    }
+
+    /* === 🆕 Whisper 直送ヘルパ ===================== */
+    async function sttWhisperDirect(blob, filename){
+        const fd = new FormData();
+        fd.append('audio', blob, filename);          // "speech.webm" など
+
+        const res = await fetch('/api/stt_to_text_speech', {
+            method : 'POST',
+            body   : fd
+        });
+        return res.json();   // {text:"..."} か {error:"..."}
     }
 
     async function ensureMicAlive() {
@@ -785,9 +819,15 @@
             f.append('audio', blob, 'u.webm');
             f.append('target_word',     currentWord);
             f.append('target_sentence', currentSentence);
-            const sttRes = await fetch('/api/stt_to_text_speech', {method: 'POST', body: f});
-            const sttJson = await sttRes.json();
-            const userText = (sttJson.text || '').trim();
+            const sttJson = await sttWhisperDirect(
+                    blob,
+                    /iP(hone|ad|od)/.test(navigator.userAgent) ? 'speech.mp4' : 'speech.webm'
+            );
+            if (sttJson.error) {
+                alert('STT Error: ' + sttJson.error);
+                return;
+            }
+            const userText = sttJson.text.trim();
 
             if (!userText) {                               // 認識失敗ガード
                 appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
@@ -883,7 +923,7 @@
             aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
 
             try {
-                aiMediaRec.start(1000);                 // 1 s チャンク
+                aiMediaRec.start();                 // 1 s チャンク
             } catch (e) {
                 console.warn('timeslice unsupported, retry w/o timeslice', e);
                 aiMediaRec.start();                     // fallback
@@ -952,8 +992,8 @@
             }
         }
 
-        /* --- 追加 (C) 初期タブを AI に --- */
-        showTab({currentTarget: $('button[onclick*="ai"]')[0]}, 'ai');
+        /* --- 初期タブを練習モードに --- */
+        showTab({currentTarget: $('button[onclick*="practice"]')[0]}, 'practice');
     });
 
 // ★ 新しく解説をfetchする関数

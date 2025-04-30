@@ -332,8 +332,10 @@
 
       <!-- 録音して送信 -->
       <div class="icon-container" style="justify-content:center; margin-top:12px;">
-          <button id="ai-record"  class="icon-btn"><i class="fas fa-microphone"></i></button>
-          <button id="ai-stop"    class="icon-btn red" disabled><i class="fas fa-stop"></i></button>
+          <button id="ai-record"  class="icon-btn" title="録音開始 Start Record"><i class="fas fa-microphone"></i></button>
+          <button id="ai-stop"    class="icon-btn red" title="録音停止 Stop Record" disabled><i class="fas fa-stop"></i></button>
+            <button id="sakura-btn" class="icon-btn green" title="日本語解説　さくら先生">🌸
+    </button>
       </div>
         <div class="next-button-container" style="margin-top:18px;">
             <button id="ai-next" class="icon-btn blue">
@@ -819,11 +821,47 @@
             lastAiScore = chatJson.score ?? null; // ★ ここを追加
         });
 
+        $('#sakura-btn').on('click', async function () {
+
+            const payload = {
+                word: currentWord,
+                sentence: currentSentence
+            };
+
+            try {
+                const res = await fetch('/api/sakura', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const js = await res.json();
+                if (js.error) {
+                    alert(js.error);
+                    return;
+                }
+
+                appendChat('assistant', js.text, 'sakura');                       // 文字も表示
+                $('#ai-audio')
+                        .attr('src', 'data:audio/mp3;base64,' + js.audio)
+                        .get(0).play();
+
+            } catch (err) {
+                console.error(err);
+                alert('さくら先生を呼び出せませんでした。');
+            }
+        });
+
         /* ======== ミニ util =================================== */
-        function appendChat(role, text) {
-            const icon = role === 'user' ? '🧑' : '🤖';
+        function appendChat(role, text, speaker = 'default') {
+
+            /* --- アイコン表 --- */
+            const icons = {
+                user: '🧑',
+                assistant: speaker === 'sakura' ? '🌸' : '🤖'   // ← ここを 🌸 に
+            };
+
             $('#chat-window')
-                    .append(`<p><b>${icon}:</b> ${text}</p>`)
+                    .append(`<p><b>${icons[role]}:</b> ${text}</p>`)
                     .scrollTop(1e6);
         }
 

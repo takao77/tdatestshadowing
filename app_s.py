@@ -1671,19 +1671,23 @@ def stt_to_text_speech():
         # -------- ① 1 回目（無変換） ------------------------------
         resp = call_whisper(file_tuple)
 
-        # -------- ② 失敗したら WAV にしてリトライ ---------------
-        if resp.status_code == 400 and "model_error" in resp.text:
-            app.logger.warning("Whisper model_error – retry with WAV")
+        # --- ② 400 なら一律リトライ ---
+        if resp.status_code == 400:
+            app.logger.warning("Whisper 400 (%s) – retry as WAV", resp.text[:60])
 
-            seg = AudioSegment.from_file(BytesIO(blob))
+            try:
+                seg = AudioSegment.from_file(BytesIO(blob))  # 自動判別
+            except Exception as e:
+                app.logger.error("ffmpeg decode fail: %s", e)
+                return jsonify({"error": "Unsupported audio format"}), 400
+
             wav_buf = BytesIO()
-            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2)\
-               .export(wav_buf, format="wav")
+            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
+                .export(wav_buf, format="wav")
             wav_buf.seek(0)
             resp = call_whisper(("speech.wav", wav_buf, "audio/wav"))
-        # ----------------------------------------------------------
 
-        # ここで最終的に 200 を期待
+        # --- ③ 最終チェック ---
         resp.raise_for_status()
 
         text = resp.text.strip()

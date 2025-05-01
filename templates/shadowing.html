@@ -966,18 +966,10 @@
             ensureMicAlive();
 
             /* ── ② MediaRecorder の生成 ─────────────── */
-            if (isIOS && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            if (isIOS) {
                 // iOS でも “true を返すが 0 byte” のバグ対策：WebM-Opus + timeslice
                 aiMediaRec = new MediaRecorder(
-                        audioStream,
-                        {mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 96000}
-                );
-            } else if (isIOS) {
-                // fallback：AAC-MP4 固定
-                aiMediaRec = new MediaRecorder(
-                        audioStream,
-                        {mimeType: 'audio/mp4', audioBitsPerSecond: 128000}
-                );
+                        audioStream);
             } else {
                 // Android / Desktop（従来ロジック）
                 const mime = chooseMime();

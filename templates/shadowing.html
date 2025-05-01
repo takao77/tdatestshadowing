@@ -190,7 +190,10 @@
   </style>
 </head>
 <body>
-
+<!-- ここからデバッグ用（開発中だけ） ------------------------- -->
+<pre id="dbg"
+     style="background:#111;color:#0f0;font-size:.75rem;
+            padding:4px;max-height:40vh;overflow:auto;"></pre>
 <!-- 左上の“家”アイコン (chimney-window付き) -->
 <a href="/home" class="home-link">
     <i class="fa-solid fa-house-chimney-window"></i>
@@ -356,10 +359,7 @@
 
   </div>
 
-    <!-- ここからデバッグ用（開発中だけ） ------------------------- -->
-    <pre id="dbg"
-         style="background:#111;color:#0f0;font-size:.75rem;
-                padding:4px;max-height:40vh;overflow:auto;"></pre>
+
 
 <!-- console.log を画面にもミラーする簡易スクリプト -->
 <script>
@@ -956,72 +956,71 @@
 
         async function startAiRec() {
             aiChunks = [];
+
+            /* ストリームが無ければ取得（echo-cancelling 等は既設定） */
             if (!audioStream) {
                 audioStream = await navigator.mediaDevices.getUserMedia({
-                    audio: true,            // ← video:false を強制
-                    video: false
+                    audio: true, video: false
                 });
             }
-            /* ② 取得直後に監視をセット */
-            ensureMicAlive();
+            ensureMicAlive();                       // ← 断線検知フック
 
-            /* ── ② MediaRecorder の生成 ─────────────── */
+            /* --- MediaRecorder の生成 -------------------------------- */
             if (isIOS) {
-                // iOS でも “true を返すが 0 byte” のバグ対策：WebM-Opus + timeslice
+                /* iOS Safari -- WebM OPUS が実質使えないので AAC-MP4 固定 */
                 aiMediaRec = new MediaRecorder(
-                        audioStream);
+                        audioStream,
+                        {
+                            mimeType: 'audio/mp4',  /* Safari が返す唯一の音声 MIME */
+                            audioBitsPerSecond: 64000,
+                            audioChannels: 1
+                        }
+                );
+                /* ★ iOS バグ回避：必ず timeslice を付ける */
+                aiMediaRec.start(1000);             // 1 s ごとに dataavailable
             } else {
-                // Android / Desktop（従来ロジック）
+                /* Android / Desktop（従来ロジック）*/
                 const mime = chooseMime();
                 aiMediaRec = mime
                         ? new MediaRecorder(audioStream, {mimeType: mime})
-                        : new MediaRecorder(audioStream);
+                        : new MediaRecorder(audioStream);          // ブラウザ任せ
+                aiMediaRec.start();               // timeslice なしで OK
             }
 
-            /* チャンク収集はそのまま */
+            /* チャンク収集 + デバッグ */
             aiMediaRec.ondataavailable = e => {
-                console.log('[dataavailable]', e.data.size);  // ←デバッグ用
-                aiChunks.push(e.data);
+                console.log('[dataavailable]', e.data.size);
+                if (e.data.size) aiChunks.push(e.data);
             };
-
-
-            try {
-                aiMediaRec.start();     // 1000 ms = 1 s
-            } catch (e) {
-                console.warn('timeslice unsupported, retry w/o timeslice', e);
-                aiMediaRec.start();         // 古いブラウザ用フォールバック
-            }
 
             $('#ai-recording-indicator').show();
         }
 
+        /* ② 録音停止 --------------------------------------------------- */
         function stopAiRec() {
-            return new Promise(resolve => {
+            return new Promise(res => {
 
-                // ① onstop 内で最後のチャンクが無いか確認
                 aiMediaRec.onstop = () => {
 
-                    // Safari バグ対策: チャンク 0 個なら requestData で強制取得
+                    /* Safari の “0-chunk” バグ対策：stop 後に requestData() */
                     if (aiChunks.length === 0) {
-                        console.warn('[stopAiRec] 0-chunk – forcing requestData()');
-                        aiMediaRec.requestData();                 // ← ここがキモ
-                        /* requestData() で dataavailable が 1 回だけ走る。
-                           そこで push されたあとに 50 ms 待って組み立てる。*/
-                        setTimeout(makeBlob, 50);
-                    } else {
-                        makeBlob();
+                        console.warn('0-chunk – forcing requestData()');
+                        aiMediaRec.requestData();           // 1 回だけ dataavailable
                     }
 
-                    function makeBlob() {
-                        const mime = isIOS ? 'audio/mp4' : 'audio/webm';
+                    /* 少し待ってから Blob を組み立てる */
+                    setTimeout(() => {
+                        /* 実際に録れた MIME を優先。なければフォールバック */
+                        const mime = aiChunks[0]?.type || (isIOS ? 'audio/mp4' : 'audio/webm');
                         const blob = new Blob(aiChunks, {type: mime});
-                        console.log('[stopAiRec] final size', blob.size);
+                        console.log('[stopAiRec] final size', blob.size, 'type', mime);
+
                         $('#ai-recording-indicator').hide();
-                        resolve(blob);
-                    }
+                        res(blob);                           // resolve へ返す
+                    }, 150);                                 // 150 ms で十分
                 };
 
-                aiMediaRec.stop();          // ← 先に stop
+                aiMediaRec.stop();      // ← これだけで OK（requestData は上で呼ぶ）
             });
         }
 

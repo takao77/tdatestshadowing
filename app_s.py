@@ -1652,6 +1652,13 @@ def stt_to_text_speech():
         fname  = fs.filename or "speech_input"
         app.logger.info("STT upload: mime=%s, size=%d", mime, len(blob))
 
+        # ----- ★ デバッグ用に一時保存 -----------------------
+        import uuid, pathlib, tempfile
+        dbg_path = pathlib.Path(tempfile.gettempdir()) / f"dbg_{uuid.uuid4()}.bin"
+        dbg_path.write_bytes(blob)             # ← ここ
+        app.logger.info("Saved debug blob → %s", dbg_path)
+        # ---------------------------------------------------
+
         # ---------- Whisper 呼び出しヘルパ ----------
         def call_whisper(file_tup):
             url = (f"{AZURE_OPENAI_STT_ENDPOINT.rstrip('/')}"

@@ -944,46 +944,70 @@
             ensureMicAlive();
 
             /* ── ② MediaRecorder の生成 ─────────────── */
-            if (isIOS) {
-                /* iOS Safari / Chrome：AAC-MP4 固定 & 128 kbps */
+            if (isIOS && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                // iOS でも “true を返すが 0 byte” のバグ対策：WebM-Opus + timeslice
                 aiMediaRec = new MediaRecorder(
                         audioStream,
-                        {
-                            mimeType: 'audio/mp4',
-                            audioBitsPerSecond: 64000,
-                            audioChannels: 1
-                        }
+                        {mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 96000}
+                );
+            } else if (isIOS) {
+                // fallback：AAC-MP4 固定
+                aiMediaRec = new MediaRecorder(
+                        audioStream,
+                        {mimeType: 'audio/mp4', audioBitsPerSecond: 128000}
                 );
             } else {
-                /* それ以外は従来ロジック（WebM 優先） */
-                const mime = chooseMime();              // 既存の関数
+                // Android / Desktop（従来ロジック）
+                const mime = chooseMime();
                 aiMediaRec = mime
                         ? new MediaRecorder(audioStream, {mimeType: mime})
-                        : new MediaRecorder(audioStream);   // ブラウザ任せ
+                        : new MediaRecorder(audioStream);
             }
 
-            aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
+            /* チャンク収集はそのまま */
+            aiMediaRec.ondataavailable = e => {
+                console.log('[dataavailable]', e.data.size);  // ←デバッグ用
+                aiChunks.push(e.data);
+            };
+
 
             try {
-                aiMediaRec.start();                 // 1 s チャンク
+                aiMediaRec.start(1000);     // 1000 ms = 1 s
             } catch (e) {
                 console.warn('timeslice unsupported, retry w/o timeslice', e);
-                aiMediaRec.start();                     // fallback
+                aiMediaRec.start();         // 古いブラウザ用フォールバック
             }
 
             $('#ai-recording-indicator').show();
         }
 
         function stopAiRec() {
-            return new Promise(res => {
-                aiMediaRec.onstop = () => {
-                    $('#ai-recording-indicator').hide();
+            return new Promise(resolve => {
 
-                    /* ★ ここを修正 — iOS なら MP4, それ以外は WebM */
-                    const mime = isIOS ? 'audio/mp4' : 'audio/webm';
-                    res(new Blob(aiChunks, {type: mime}));
+                // ① onstop 内で最後のチャンクが無いか確認
+                aiMediaRec.onstop = () => {
+
+                    // Safari バグ対策: チャンク 0 個なら requestData で強制取得
+                    if (aiChunks.length === 0) {
+                        console.warn('[stopAiRec] 0-chunk – forcing requestData()');
+                        aiMediaRec.requestData();                 // ← ここがキモ
+                        /* requestData() で dataavailable が 1 回だけ走る。
+                           そこで push されたあとに 50 ms 待って組み立てる。*/
+                        setTimeout(makeBlob, 50);
+                    } else {
+                        makeBlob();
+                    }
+
+                    function makeBlob() {
+                        const mime = isIOS ? 'audio/mp4' : 'audio/webm';
+                        const blob = new Blob(aiChunks, {type: mime});
+                        console.log('[stopAiRec] final size', blob.size);
+                        $('#ai-recording-indicator').hide();
+                        resolve(blob);
+                    }
                 };
-                aiMediaRec.stop();
+
+                aiMediaRec.stop();          // ← 先に stop
             });
         }
 

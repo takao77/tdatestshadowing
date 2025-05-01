@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>Mobile Recorder Test</title>
+<style>
+body{font-family:sans-serif;background:#222;color:#eee;display:flex;flex-direction:column;align-items:center;margin:0;padding:40px}
+button{font-size:1.2rem;padding:12px 24px;margin:6px;border:0;border-radius:6px;cursor:pointer}
+#log{white-space:pre-line;margin-top:18px;font-size:.9rem;background:#111;padding:10px 14px;border-radius:6px;width:90%;max-width:480px}
+a.dl{display:none;margin-top:14px}
+</style>
+
+<h1>📻 録音テスト（MediaRecorder 単体）</h1>
+
+<button id="recBtn">🔴 Start Rec</button>
+<button id="stopBtn" disabled>⏹ Stop</button>
+<a id="download" class="dl" download>⬇️ Download recording</a>
+<audio id="player" controls style="display:none;margin-top:20px;width:90%;max-width:480px"></audio>
+<pre id="log"></pre>
+
+<script>
+const log   = (...m)=>logEl.textContent += m.join(' ') + '\n';
+const logEl = document.getElementById('log');
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+
+let stream,rec,chunks=[];
+
+document.getElementById('recBtn').onclick = async ()=>{
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:true,noiseSuppression:true
+    }});
+  }catch(e){
+    alert('mic permission denied');return;
+  }
+  const mime = isIOS
+      ? 'audio/mp4;codecs=mp4a.40.2'
+      : (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+         ? 'audio/webm;codecs=opus' : 'audio/webm');
+  rec = new MediaRecorder(stream,{mimeType:mime});
+  chunks = [];
+  rec.ondataavailable = e=>{
+     log('[dataavailable]',e.data.size,'bytes');
+     if(e.data.size) chunks.push(e.data);
+  };
+  rec.start();          // timeslice なし
+  log('▶️ recording… mime=',mime);
+  recBtn.disabled = true; stopBtn.disabled = false;
+};
+
+document.getElementById('stopBtn').onclick = ()=>{
+  rec.stop();
+  rec.onstop = ()=>{
+    const blob = new Blob(chunks,{type:rec.mimeType});
+    log('■ stopped. total',blob.size,'bytes');
+    if(blob.size<1024){alert('録音できていません…');return;}
+    const url = URL.createObjectURL(blob);
+    player.src = url; player.style.display='';
+    download.href = url;
+    download.download = isIOS?'test.m4a':'test.webm';
+    download.style.display='inline-block';
+  };
+  recBtn.disabled = false; stopBtn.disabled = true;
+};
+</script>

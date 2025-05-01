@@ -838,7 +838,7 @@
             f.append('target_sentence', currentSentence);
             const sttJson = await sttWhisperDirect(
                     blob,
-                    /iP(hone|ad|od)/.test(navigator.userAgent) ? 'speech.m4a' : 'speech.webm'
+                    isIOS ? 'speech.mp4' : 'speech.webm'   // ← iOS なら MP4
             );
             if (sttJson.error) {
                 alert('STT Error: ' + sttJson.error);
@@ -924,11 +924,16 @@
 
         /* ======== Recorder helpers =========================== */
         let aiMediaRec, aiChunks = [];
+        /* ① ユーザーエージェント判定を共通化しておく */
+        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 
         async function startAiRec() {
             aiChunks = [];
             if (!audioStream) {
-                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,            // ← video:false を強制
+                    video: false
+                });
             }
             /* ② 取得直後に監視をセット */
             ensureMicAlive();
@@ -967,7 +972,10 @@
             return new Promise(res => {
                 aiMediaRec.onstop = () => {
                     $('#ai-recording-indicator').hide();
-                    res(new Blob(aiChunks, {type: 'audio/webm'}));
+
+                    /* ★ iOS なら audio/mp4、その他は audio/webm */
+                    const mime = isIOS ? 'audio/mp4' : 'audio/webm';
+                    res(new Blob(aiChunks, {type: mime}));
                 };
                 aiMediaRec.stop();
             });

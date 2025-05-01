@@ -1649,8 +1649,10 @@ def stt_to_text_speech():
         mime  = fs.mimetype  or "application/octet-stream"
         fname = fs.filename or "speech_input"
 
-        # --- ① 変換が必要か判定  ---------------------------------
-        NEED_CONVERT = mime not in {"audio/webm", "audio/wav"}
+        SAFE_MIME = {"audio/webm", "audio/wav"}
+        NEED_CONVERT = mime not in SAFE_MIME
+
+        app.logger.info("STT upload: mime=%s, size=%d", mime, len(blob))
 
         if NEED_CONVERT:
             from io import BytesIO

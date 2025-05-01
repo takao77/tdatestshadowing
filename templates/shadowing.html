@@ -959,63 +959,36 @@
 
         /** 録音開始 */
         async function startAiRec() {
-
-            /* 🔸 test_recorder と同じ ── 新 stream を毎回取得 🔸 */
             const freshStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
+                audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}
             });
 
-            aiChunks = [];                               // チャンク初期化
-
-            /* 🔸 iOS かどうかで MIME を選択 ─ 同じ式を再利用 🔸 */
+            aiChunks = [];
             const mime = isIOS
-                    ? 'audio/mp4;codecs=mp4a.40.2'           // iOS: AAC-MP4
+                    ? 'audio/mp4;codecs=mp4a.40.2'
                     : (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-                            ? 'audio/webm;codecs=opus'
-                            : 'audio/webm');
+                            ? 'audio/webm;codecs=opus' : 'audio/webm');
 
             aiMediaRec = new MediaRecorder(freshStream, {mimeType: mime});
-
             aiMediaRec.ondataavailable = e => {
-                console.log('[dataavailable]', e.data.size);
                 if (e.data.size) aiChunks.push(e.data);
             };
 
-            /* 🔸 ここがポイント 🔸 */
-            if (isIOS) {
-                aiMediaRec.start(1000);   // ← 1 s ごとに必ず data が出る
-            } else {
-                aiMediaRec.start();       // PC / Android は従来通り
-            }
-
+            aiMediaRec.start();          // ★ timeslice 無しで統一
             $('#ai-recording-indicator').show();
         }
 
         /** 録音停止 */
         function stopAiRec() {
             return new Promise(resolve => {
-
-                /* まず最後の data を強制的に吐かせる */
-                aiMediaRec.requestData();
-
                 aiMediaRec.onstop = () => {
-                    // requestData の分も含め、50 ms 待って blob 生成
-                    setTimeout(() => {
-                        const type = aiChunks[0]?.type || (isIOS ? 'audio/mp4' : 'audio/webm');
-                        const blob = new Blob(aiChunks, {type});
-                        console.log('[stopAiRec] final', blob.size, 'bytes', type);
-
-                        aiMediaRec.stream.getTracks().forEach(t => t.stop());
-                        $('#ai-recording-indicator').hide();
-                        resolve(blob);
-                    }, 50);
+                    const type = aiChunks[0]?.type || (isIOS ? 'audio/mp4' : 'audio/webm');
+                    const blob = new Blob(aiChunks, {type});
+                    aiMediaRec.stream.getTracks().forEach(t => t.stop());
+                    $('#ai-recording-indicator').hide();
+                    resolve(blob);
                 };
-
-                aiMediaRec.stop();          // ← 先に stop
+                aiMediaRec.stop();       // ★ requestData() は呼ばない
             });
         }
 

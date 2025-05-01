@@ -1643,52 +1643,50 @@ def stt_to_text_speech():
     Whisper 文字起こしが英語以外なら 400 を返す
     """
     try:
-        fs   = request.files["audio"]                        # FileStorage
-        blob = fs.read()                                     # ★ 先に全部読む
+        # ------------- 前処理（blob 取得・変換判定など）------------
+        fs   = request.files["audio"]
+        blob = fs.read()
         mime = fs.mimetype or "application/octet-stream"
         fname= fs.filename or "speech_input"
-
-        # --- ログで把握 -----------------------------------
         app.logger.info("STT upload: mime=%s, size=%d", mime, len(blob))
+        # まずは“そのまま”送る
+        file_tuple = (fname, BytesIO(blob), mime)
 
-        SAFE_MIME = {"audio/webm", "audio/wav"}              # 無変換許可
-        NEED_CONVERT = mime not in SAFE_MIME
+        # ---------- ★ ここで helper をネスト定義 ------------------
+        def call_whisper(file_tup):
+            whisper_url = (
+                f"{AZURE_OPENAI_STT_ENDPOINT.rstrip('/')}"
+                f"/openai/deployments/{AZURE_OPENAI_STT_DEPLOY}"
+                f"/audio/transcriptions?api-version={STT_API_VER}"
+            )
+            return requests.post(
+                whisper_url,
+                headers={"api-key": AZURE_OPENAI_STT_KEY},
+                files={"file": file_tup},
+                data={"response_format": "text", "language": "en"},
+                timeout=90
+            )
+        # ----------------------------------------------------------
 
-        if NEED_CONVERT:
-            # ▲▲ モバイルなど：WAV へ変換
-            seg = AudioSegment.from_file(BytesIO(blob))      # 自動判別
-            buf = BytesIO()
-            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
-               .export(buf, format="wav")
-            buf.seek(0)
-            file_tuple = ("speech.wav", buf, "audio/wav")
-        else:
-            # ▲▲ デスクトップなど：そのまま。blob を BytesIO で包む
-            file_tuple = (fname, BytesIO(blob), mime)
+        # -------- ① 1 回目（無変換） ------------------------------
+        resp = call_whisper(file_tuple)
 
-        whisper_url = (
-            f"{AZURE_OPENAI_STT_ENDPOINT.rstrip('/')}"
-            f"/openai/deployments/{AZURE_OPENAI_STT_DEPLOY}"
-            f"/audio/transcriptions?api-version={STT_API_VER}"
-        )
+        # -------- ② 失敗したら WAV にしてリトライ ---------------
+        if resp.status_code == 400 and "model_error" in resp.text:
+            app.logger.warning("Whisper model_error – retry with WAV")
 
-        resp = requests.post(
-            whisper_url,
-            headers={"api-key": AZURE_OPENAI_STT_KEY},
-            files={"file": file_tuple},
-            data={"response_format": "text", "language": "en"},
-            timeout=90
-        )
+            seg = AudioSegment.from_file(BytesIO(blob))
+            wav_buf = BytesIO()
+            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2)\
+               .export(wav_buf, format="wav")
+            wav_buf.seek(0)
+            resp = call_whisper(("speech.wav", wav_buf, "audio/wav"))
+        # ----------------------------------------------------------
 
-        try:
-            resp.raise_for_status()                          # 200 でスルー
-        except requests.HTTPError:
-            app.logger.error("Whisper detail: %s", resp.text)
-            raise
+        # ここで最終的に 200 を期待
+        resp.raise_for_status()
 
         text = resp.text.strip()
-
-        # 英語チェック
         if not text or re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", text):
             return jsonify({"error": "英語を話してくださいね！"}), 400
 

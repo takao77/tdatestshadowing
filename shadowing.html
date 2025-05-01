@@ -181,6 +181,12 @@
           overflow-y:auto;          /* はみ出せばスクロール */
       }
     }
+    #mode-guide{
+      margin:18px 0 0;
+      font-size:.95rem;
+      line-height:1.4;
+      opacity:.85;
+    }
   </style>
 </head>
 <body>
@@ -194,11 +200,15 @@
 
   <div class="container">
     <h1 id="dynamic-sentence">Loading sentence...</h1> <!-- Dynamic sentence will be populated here -->
+    <p id="mode-guide"
+       style="margin:18px 0 0; font-size:.95rem; line-height:1.4; opacity:.85;">
+      <!-- JS が内容を書き替えます -->
+    </p>
 
     <!-- Tabs for Practice Mode and Record Mode -->
     <div class="tab">
-      <button class="active" onclick="showTab(event,'ai')">AI&nbsp;モード</button>
-        <button onclick="showTab(event, 'practice')">練習モード</button>
+        <button class="active" onclick="showTab(event, 'practice')">練習モード</button>
+        <button onclick="showTab(event,'ai')">AI&nbsp;モード</button>
         <button onclick="showTab(event, 'explanation')">解説モード</button>
         <button onclick="showTab(event, 'record')">録音モード</button>
     </div>
@@ -370,11 +380,16 @@
     let aiIntroDone = false;
     let lastAiScore = null;
 
+    /* ★ この行を追加（ここで1回だけ判定） */
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+
     /* === 1) まずグローバル関数を宣言 ========================= */
     function updateVisibility() {
         const practice = $('#practice').hasClass('active');
         const ai = $('#ai').hasClass('active');
         const dictation = practice && isDictation;
+        const recordTab = $('#record').hasClass('active');   // ★ 追加
+
 
         // ① 例文
         $('#dynamic-sentence').toggle(!dictation);
@@ -387,6 +402,22 @@
 
         /* ★ ④ Shadowing 用 UI（practice-btn / audio）*/
         $('#practice-btn, #practice-audio').toggle(practice && !dictation);
+
+        if (dictation) {        // Dictation (= practice タブ & isDictation=true)
+            $('#mode-guide').html(
+                    'ディクテーション：例文を聞いて単語だけ入力しましょう'
+            );
+        } else if (practice) {   // Shadowing (= practice タブ & isDictation=false)
+            $('#mode-guide').html(
+                    ' ▶ を押して例文を５回シャドーイングしましょう'
+            );
+        } else if (recordTab) {          // ★ ここを追加
+            $('#mode-guide').html(
+                    ''
+            );
+        } else {                        // AI / 解説
+            $('#mode-guide').text('');
+        }
     }
 
     function enterShadowMode() {
@@ -409,6 +440,18 @@
         if (MediaRecorder.isTypeSupported('audio/wav'))
             return 'audio/wav';                // 最終手段
         return '';                             // ブラウザ任せ
+    }
+
+    /* === 🆕 Whisper 直送ヘルパ ===================== */
+    async function sttWhisperDirect(blob, filename){
+        const fd = new FormData();
+        fd.append('audio', blob, filename);          // "speech.webm" など
+
+        const res = await fetch('/api/stt_to_text_speech', {
+            method : 'POST',
+            body   : fd
+        });
+        return res.json();   // {text:"..."} か {error:"..."}
     }
 
     async function ensureMicAlive() {
@@ -449,7 +492,13 @@
 
         // Request microphone access once and store the stream
         try {
-          audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,   // ★ AEC
+                    noiseSuppression: true,   // ★ NS
+                    autoGainControl: true    // ★ AGC （端末依存）
+                }
+            });
           console.log('Microphone access granted.');
         } catch (error) {
           console.error('Error accessing microphone:', error);
@@ -610,35 +659,40 @@
         });
 
         // Record Mode: Start recording user's voice
-        $('#record-play-btn').on('click', function() {
-          const sentence = $('#dynamic-sentence').text();
-          const formData = new FormData();
-          formData.append('sentence', sentence);
-          formData.append('mode', 'record');
+        $('#record-play-btn').on('click', async function () {
+            const sentence = $('#dynamic-sentence').text();
+            const formData = new FormData();
+            formData.append('sentence', sentence);
+            formData.append('mode', 'record');
 
-          fetch('/generate_shadow_audio', {
-            method: 'POST',
-            body: formData
-          })
-          .then(response => response.json())
-          .then(data => {
-            if (data.error) {
-              alert('Error: ' + data.error);
-            } else {
-              const azureAudioPlayer = $('#record-audio');
-              azureAudioPlayer.attr('src', 'data:audio/mp3;base64,' + data.audio);
-              azureAudioPlayer[0].play().catch(error => {
-                console.error('Playback failed:', error);
-              });
+            const data = await fetch('/generate_shadow_audio', {method: 'POST', body: formData})
+                    .then(r => r.json());
 
-              // Start recording user's voice when the audio starts playing
-              azureAudioPlayer[0].onplay = function() {
-                startRecording();
-                $('#stop-record-btn').prop('disabled', false);
-              };
+            /* === ここは録音モード専用の <audio> === */
+            const audioEl = $('#record-audio')
+                    .attr('src', 'data:audio/mp3;base64,' + data.audio)
+                    .get(0);
+
+            /* ▼▼▼ イヤホン固定はこの 7 行だけ ▼▼▼ */
+            if (audioEl.setSinkId) {                       // Chrome デスクトップのみ
+                const outs = await navigator.mediaDevices.enumerateDevices();
+                const hp = outs.find(d => d.kind === 'audiooutput'
+                        && /headphone/i.test(d.label));
+                if (hp) {
+                    try {
+                        await audioEl.setSinkId(hp.deviceId);
+                    } catch (e) {
+                        console.warn('setSinkId failed', e);
+                    }
+                }
             }
-          })
-          .catch(error => console.error('Error fetching shadow audio:', error));
+            /* ▲▲▲ これで「録音モード再生時のみ」イヤホン強制 ▲▲▲ */
+
+            audioEl.onplay = async () => {
+                await startRecording();                    // ← AI 再生と同時録音
+                $('#stop-record-btn').prop('disabled', false);
+            };
+            audioEl.play();
         });
 
         // Stop recording and save the audio to the backend
@@ -777,6 +831,10 @@
         // ② 録音停止 → STT → /api/ai_chat へ送信
         $('#ai-stop').on('click', async () => {
             const blob = await stopAiRec();                // ← 新版の stop
+            if (blob.size < 1024) {                // 1 KB 未満ならほぼ録れていない
+                alert('🎤 音声が記録されませんでした。もう一度お試しください。');
+                return;
+            }
             $('#ai-stop').prop('disabled', true);
             $('#ai-record').prop('disabled', false);
 
@@ -785,9 +843,15 @@
             f.append('audio', blob, 'u.webm');
             f.append('target_word',     currentWord);
             f.append('target_sentence', currentSentence);
-            const sttRes = await fetch('/api/stt_to_text_speech', {method: 'POST', body: f});
-            const sttJson = await sttRes.json();
-            const userText = (sttJson.text || '').trim();
+            const sttJson = await sttWhisperDirect(
+                    blob,
+                    isIOS ? 'speech.mp4' : 'speech.webm'   // ← iOS なら MP4
+            );
+            if (sttJson.error) {
+                alert('STT Error: ' + sttJson.error);
+                return;
+            }
+            const userText = sttJson.text.trim();
 
             if (!userText) {                               // 認識失敗ガード
                 appendChat('assistant', '❗ 音声が認識できませんでした。もう一度お願いします。');
@@ -871,34 +935,79 @@
         async function startAiRec() {
             aiChunks = [];
             if (!audioStream) {
-                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,            // ← video:false を強制
+                    video: false
+                });
             }
             /* ② 取得直後に監視をセット */
             ensureMicAlive();
 
-            const mime = chooseMime();
-            aiMediaRec = mime ? new MediaRecorder(audioStream, {mimeType: mime})
-                    : new MediaRecorder(audioStream);
+            /* ── ② MediaRecorder の生成 ─────────────── */
+            if (isIOS && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                // iOS でも “true を返すが 0 byte” のバグ対策：WebM-Opus + timeslice
+                aiMediaRec = new MediaRecorder(
+                        audioStream,
+                        {mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 96000}
+                );
+            } else if (isIOS) {
+                // fallback：AAC-MP4 固定
+                aiMediaRec = new MediaRecorder(
+                        audioStream,
+                        {mimeType: 'audio/mp4', audioBitsPerSecond: 128000}
+                );
+            } else {
+                // Android / Desktop（従来ロジック）
+                const mime = chooseMime();
+                aiMediaRec = mime
+                        ? new MediaRecorder(audioStream, {mimeType: mime})
+                        : new MediaRecorder(audioStream);
+            }
 
-            aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
+            /* チャンク収集はそのまま */
+            aiMediaRec.ondataavailable = e => {
+                console.log('[dataavailable]', e.data.size);  // ←デバッグ用
+                aiChunks.push(e.data);
+            };
+
 
             try {
-                aiMediaRec.start();                 // 1 s チャンク
+                aiMediaRec.start(1000);     // 1000 ms = 1 s
             } catch (e) {
                 console.warn('timeslice unsupported, retry w/o timeslice', e);
-                aiMediaRec.start();                     // fallback
+                aiMediaRec.start();         // 古いブラウザ用フォールバック
             }
 
             $('#ai-recording-indicator').show();
         }
 
         function stopAiRec() {
-            return new Promise(res => {
+            return new Promise(resolve => {
+
+                // ① onstop 内で最後のチャンクが無いか確認
                 aiMediaRec.onstop = () => {
-                    $('#ai-recording-indicator').hide();
-                    res(new Blob(aiChunks, {type: 'audio/webm'}));
+
+                    // Safari バグ対策: チャンク 0 個なら requestData で強制取得
+                    if (aiChunks.length === 0) {
+                        console.warn('[stopAiRec] 0-chunk – forcing requestData()');
+                        aiMediaRec.requestData();                 // ← ここがキモ
+                        /* requestData() で dataavailable が 1 回だけ走る。
+                           そこで push されたあとに 50 ms 待って組み立てる。*/
+                        setTimeout(makeBlob, 50);
+                    } else {
+                        makeBlob();
+                    }
+
+                    function makeBlob() {
+                        const mime = isIOS ? 'audio/mp4' : 'audio/webm';
+                        const blob = new Blob(aiChunks, {type: mime});
+                        console.log('[stopAiRec] final size', blob.size);
+                        $('#ai-recording-indicator').hide();
+                        resolve(blob);
+                    }
                 };
-                aiMediaRec.stop();
+
+                aiMediaRec.stop();          // ← 先に stop
             });
         }
 
@@ -952,8 +1061,8 @@
             }
         }
 
-        /* --- 追加 (C) 初期タブを AI に --- */
-        showTab({currentTarget: $('button[onclick*="ai"]')[0]}, 'ai');
+        /* --- 初期タブを練習モードに --- */
+        showTab({currentTarget: $('button[onclick*="practice"]')[0]}, 'practice');
     });
 
 // ★ 新しく解説をfetchする関数

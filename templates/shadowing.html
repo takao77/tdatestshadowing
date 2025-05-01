@@ -985,7 +985,13 @@
                 if (e.data.size) aiChunks.push(e.data);
             };
 
-            aiMediaRec.start();                          // ← timeslice なし
+            /* 🔸 ここがポイント 🔸 */
+            if (isIOS) {
+                aiMediaRec.start(1000);   // ← 1 s ごとに必ず data が出る
+            } else {
+                aiMediaRec.start();       // PC / Android は従来通り
+            }
+
             $('#ai-recording-indicator').show();
         }
 
@@ -993,34 +999,23 @@
         function stopAiRec() {
             return new Promise(resolve => {
 
+                /* まず最後の data を強制的に吐かせる */
+                aiMediaRec.requestData();
+
                 aiMediaRec.onstop = () => {
-                    // Safari が dataavailable を出さない保険
-                    if (aiChunks.length === 0) {
-                        console.warn('0-chunk – requestData fallback');
-                        aiMediaRec.requestData();
-                    }
-
-                    /* 50 ms 待ってから Blob を組み立てる */
+                    // requestData の分も含め、50 ms 待って blob 生成
                     setTimeout(() => {
-
-                        const type = aiChunks[0]?.type || (isIOS
-                                ? 'audio/mp4'
-                                : 'audio/webm');
+                        const type = aiChunks[0]?.type || (isIOS ? 'audio/mp4' : 'audio/webm');
                         const blob = new Blob(aiChunks, {type});
+                        console.log('[stopAiRec] final', blob.size, 'bytes', type);
 
-                        console.log('[stopAiRec] final size',
-                                blob.size, 'type', type);
-
-                        // 🔸 使い終わったらストリームを止めてメモリ開放
                         aiMediaRec.stream.getTracks().forEach(t => t.stop());
-
                         $('#ai-recording-indicator').hide();
                         resolve(blob);
-
                     }, 50);
                 };
 
-                aiMediaRec.stop();
+                aiMediaRec.stop();          // ← 先に stop
             });
         }
 

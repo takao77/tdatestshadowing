@@ -193,7 +193,10 @@
 <!-- ここからデバッグ用（開発中だけ） ------------------------- -->
 <pre id="dbg"
      style="background:#111;color:#0f0;font-size:.75rem;
-            padding:4px;max-height:40vh;overflow:auto;"></pre>
+            padding:4px;max-height:40vh;overflow:auto;
+            position:fixed;      /* ← 追加 */
+            top:10px; left:100px; /* ← 追加（好きな座標に） */
+            z-index:2000;"></pre>
 <!-- 左上の“家”アイコン (chimney-window付き) -->
 <a href="/home" class="home-link">
     <i class="fa-solid fa-house-chimney-window"></i>
@@ -956,48 +959,67 @@
 
         /** 録音開始 */
         async function startAiRec() {
-            aiChunks = [];
 
-            /* ストリームをまだ持っていなければ取得 */
-            if (!audioStream) {
-                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
-                ensureMicAlive();               // ← 昔からあるマイク監視
-            }
+            /* 🔸 test_recorder と同じ ── 新 stream を毎回取得 🔸 */
+            const freshStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
 
-            /* ★ ここがキモ ── Safari でも “余計な指定は一切しない” */
-            aiMediaRec = new MediaRecorder(audioStream);   // ← mimeType 指定なし
+            aiChunks = [];                               // チャンク初期化
 
-            /* チャンクを溜めるだけ (debug 付き) */
+            /* 🔸 iOS かどうかで MIME を選択 ─ 同じ式を再利用 🔸 */
+            const mime = isIOS
+                    ? 'audio/mp4;codecs=mp4a.40.2'           // iOS: AAC-MP4
+                    : (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                            ? 'audio/webm;codecs=opus'
+                            : 'audio/webm');
+
+            aiMediaRec = new MediaRecorder(freshStream, {mimeType: mime});
+
             aiMediaRec.ondataavailable = e => {
                 console.log('[dataavailable]', e.data.size);
                 if (e.data.size) aiChunks.push(e.data);
             };
 
-            aiMediaRec.start();                 // ← timeslice も付けない
+            aiMediaRec.start();                          // ← timeslice なし
             $('#ai-recording-indicator').show();
         }
 
         /** 録音停止 */
         function stopAiRec() {
-            return new Promise(res => {
+            return new Promise(resolve => {
+
                 aiMediaRec.onstop = () => {
-                    /* Safari が dataavailable を出さなかった場合の保険 */
+                    // Safari が dataavailable を出さない保険
                     if (aiChunks.length === 0) {
-                        console.warn('0-chunk – requestData() fallback');
+                        console.warn('0-chunk – requestData fallback');
                         aiMediaRec.requestData();
                     }
 
-                    /* 50 ms 待ってから Blob を組む */
+                    /* 50 ms 待ってから Blob を組み立てる */
                     setTimeout(() => {
-                        const blob = new Blob(
-                                aiChunks,
-                                {type: aiChunks[0]?.type || 'audio/mp4'}
-                        );
-                        console.log('[stopAiRec] final size', blob.size, 'type', blob.type);
+
+                        const type = aiChunks[0]?.type || (isIOS
+                                ? 'audio/mp4'
+                                : 'audio/webm');
+                        const blob = new Blob(aiChunks, {type});
+
+                        console.log('[stopAiRec] final size',
+                                blob.size, 'type', type);
+
+                        // 🔸 使い終わったらストリームを止めてメモリ開放
+                        aiMediaRec.stream.getTracks().forEach(t => t.stop());
+
                         $('#ai-recording-indicator').hide();
-                        res(blob);
+                        resolve(blob);
+
                     }, 50);
                 };
+
                 aiMediaRec.stop();
             });
         }

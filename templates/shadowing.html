@@ -356,6 +356,27 @@
 
   </div>
 
+    <!-- ここからデバッグ用（開発中だけ） ------------------------- -->
+    <pre id="dbg"
+         style="background:#111;color:#0f0;font-size:.75rem;
+                padding:4px;max-height:40vh;overflow:auto;"></pre>
+
+<!-- console.log を画面にもミラーする簡易スクリプト -->
+<script>
+    (function () {
+        const oldLog = console.log;
+        console.log = function (...args) {
+            oldLog.apply(console, args);                       // 元のログも維持
+            const el = document.getElementById('dbg');
+            if (el) {
+                el.textContent += args.map(String).join(' ') + '\n';
+            }
+        };
+    })();
+</script>
+<!-- ↑↑ これより下で呼ばれる console.log はすべて <pre> に出ます ↑↑ -->
+<!-- ------------------------------------------------------------ -->
+
   <!-- jQuery and Bootstrap JS -->
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
 
@@ -831,6 +852,7 @@
         // ② 録音停止 → STT → /api/ai_chat へ送信
         $('#ai-stop').on('click', async () => {
             const blob = await stopAiRec();                // ← 新版の stop
+            console.log('[debug] blob.size =', blob.size, 'type =', blob.type);
             if (blob.size < 1024) {                // 1 KB 未満ならほぼ録れていない
                 alert('🎤 音声が記録されませんでした。もう一度お試しください。');
                 return;
@@ -972,7 +994,7 @@
 
 
             try {
-                aiMediaRec.start(1000);     // 1000 ms = 1 s
+                aiMediaRec.start();     // 1000 ms = 1 s
             } catch (e) {
                 console.warn('timeslice unsupported, retry w/o timeslice', e);
                 aiMediaRec.start();         // 古いブラウザ用フォールバック

@@ -954,73 +954,51 @@
         /* ======== Recorder helpers =========================== */
         let aiMediaRec, aiChunks = [];
 
+        /** 録音開始 */
         async function startAiRec() {
             aiChunks = [];
 
-            /* ストリームが無ければ取得（echo-cancelling 等は既設定） */
+            /* ストリームをまだ持っていなければ取得 */
             if (!audioStream) {
-                audioStream = await navigator.mediaDevices.getUserMedia({
-                    audio: true, video: false
-                });
-            }
-            ensureMicAlive();                       // ← 断線検知フック
-
-            /* --- MediaRecorder の生成 -------------------------------- */
-            if (isIOS) {
-                /* iOS Safari -- WebM OPUS が実質使えないので AAC-MP4 固定 */
-                aiMediaRec = new MediaRecorder(
-                        audioStream,
-                        {
-                            mimeType: 'audio/mp4',  /* Safari が返す唯一の音声 MIME */
-                            audioBitsPerSecond: 64000,
-                            audioChannels: 1
-                        }
-                );
-                /* ★ iOS バグ回避：必ず timeslice を付ける */
-                aiMediaRec.start(1000);             // 1 s ごとに dataavailable
-            } else {
-                /* Android / Desktop（従来ロジック）*/
-                const mime = chooseMime();
-                aiMediaRec = mime
-                        ? new MediaRecorder(audioStream, {mimeType: mime})
-                        : new MediaRecorder(audioStream);          // ブラウザ任せ
-                aiMediaRec.start();               // timeslice なしで OK
+                audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+                ensureMicAlive();               // ← 昔からあるマイク監視
             }
 
-            /* チャンク収集 + デバッグ */
+            /* ★ ここがキモ ── Safari でも “余計な指定は一切しない” */
+            aiMediaRec = new MediaRecorder(audioStream);   // ← mimeType 指定なし
+
+            /* チャンクを溜めるだけ (debug 付き) */
             aiMediaRec.ondataavailable = e => {
                 console.log('[dataavailable]', e.data.size);
                 if (e.data.size) aiChunks.push(e.data);
             };
 
+            aiMediaRec.start();                 // ← timeslice も付けない
             $('#ai-recording-indicator').show();
         }
 
-        /* ② 録音停止 --------------------------------------------------- */
+        /** 録音停止 */
         function stopAiRec() {
             return new Promise(res => {
-
                 aiMediaRec.onstop = () => {
-
-                    /* Safari の “0-chunk” バグ対策：stop 後に requestData() */
+                    /* Safari が dataavailable を出さなかった場合の保険 */
                     if (aiChunks.length === 0) {
-                        console.warn('0-chunk – forcing requestData()');
-                        aiMediaRec.requestData();           // 1 回だけ dataavailable
+                        console.warn('0-chunk – requestData() fallback');
+                        aiMediaRec.requestData();
                     }
 
-                    /* 少し待ってから Blob を組み立てる */
+                    /* 50 ms 待ってから Blob を組む */
                     setTimeout(() => {
-                        /* 実際に録れた MIME を優先。なければフォールバック */
-                        const mime = aiChunks[0]?.type || (isIOS ? 'audio/mp4' : 'audio/webm');
-                        const blob = new Blob(aiChunks, {type: mime});
-                        console.log('[stopAiRec] final size', blob.size, 'type', mime);
-
+                        const blob = new Blob(
+                                aiChunks,
+                                {type: aiChunks[0]?.type || 'audio/mp4'}
+                        );
+                        console.log('[stopAiRec] final size', blob.size, 'type', blob.type);
                         $('#ai-recording-indicator').hide();
-                        res(blob);                           // resolve へ返す
-                    }, 150);                                 // 150 ms で十分
+                        res(blob);
+                    }, 50);
                 };
-
-                aiMediaRec.stop();      // ← これだけで OK（requestData は上で呼ぶ）
+                aiMediaRec.stop();
             });
         }
 

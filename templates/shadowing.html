@@ -933,9 +933,23 @@
             /* ② 取得直後に監視をセット */
             ensureMicAlive();
 
-            const mime = chooseMime();
-            aiMediaRec = mime ? new MediaRecorder(audioStream, {mimeType: mime})
-                    : new MediaRecorder(audioStream);
+            /* ── ① 端末判定 ───────────────────────── */
+            const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+
+            /* ── ② MediaRecorder の生成 ─────────────── */
+            if (isIOS) {
+                /* iOS Safari / Chrome：AAC-MP4 固定 & 128 kbps */
+                aiMediaRec = new MediaRecorder(
+                        audioStream,
+                        {mimeType: 'audio/mp4', audioBitsPerSecond: 128000}
+                );
+            } else {
+                /* それ以外は従来ロジック（WebM 優先） */
+                const mime = chooseMime();              // 既存の関数
+                aiMediaRec = mime
+                        ? new MediaRecorder(audioStream, {mimeType: mime})
+                        : new MediaRecorder(audioStream);   // ブラウザ任せ
+            }
 
             aiMediaRec.ondataavailable = e => aiChunks.push(e.data);
 

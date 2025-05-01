@@ -380,6 +380,9 @@
     let aiIntroDone = false;
     let lastAiScore = null;
 
+    /* ★ この行を追加（ここで1回だけ判定） */
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+
     /* === 1) まずグローバル関数を宣言 ========================= */
     function updateVisibility() {
         const practice = $('#practice').hasClass('active');
@@ -828,6 +831,10 @@
         // ② 録音停止 → STT → /api/ai_chat へ送信
         $('#ai-stop').on('click', async () => {
             const blob = await stopAiRec();                // ← 新版の stop
+            if (blob.size < 1024) {                // 1 KB 未満ならほぼ録れていない
+                alert('🎤 音声が記録されませんでした。もう一度お試しください。');
+                return;
+            }
             $('#ai-stop').prop('disabled', true);
             $('#ai-record').prop('disabled', false);
 
@@ -924,8 +931,6 @@
 
         /* ======== Recorder helpers =========================== */
         let aiMediaRec, aiChunks = [];
-        /* ① ユーザーエージェント判定を共通化しておく */
-        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 
         async function startAiRec() {
             aiChunks = [];
@@ -937,9 +942,6 @@
             }
             /* ② 取得直後に監視をセット */
             ensureMicAlive();
-
-            /* ── ① 端末判定 ───────────────────────── */
-            const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 
             /* ── ② MediaRecorder の生成 ─────────────── */
             if (isIOS) {
@@ -973,7 +975,7 @@
                 aiMediaRec.onstop = () => {
                     $('#ai-recording-indicator').hide();
 
-                    /* ★ iOS なら audio/mp4、その他は audio/webm */
+                    /* ★ ここを修正 — iOS なら MP4, それ以外は WebM */
                     const mime = isIOS ? 'audio/mp4' : 'audio/webm';
                     res(new Blob(aiChunks, {type: mime}));
                 };

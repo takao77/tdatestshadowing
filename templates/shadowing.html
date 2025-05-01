@@ -948,7 +948,11 @@
                 /* iOS Safari / Chrome：AAC-MP4 固定 & 128 kbps */
                 aiMediaRec = new MediaRecorder(
                         audioStream,
-                        {mimeType: 'audio/mp4', audioBitsPerSecond: 128000}
+                        {
+                            mimeType: 'audio/mp4',
+                            audioBitsPerSecond: 64000,
+                            audioChannels: 1
+                        }
                 );
             } else {
                 /* それ以外は従来ロジック（WebM 優先） */

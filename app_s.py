@@ -1863,6 +1863,12 @@ Sentence: 「{sentence}」
     return jsonify({'text': jp_text, 'audio': b64})
 
 
+@app.route("/test_recorder")
+def test_recorder():
+    # templates/test_recorder.html を返す
+    return render_template("test_recorder.html")
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

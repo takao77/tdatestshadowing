@@ -1638,35 +1638,33 @@ def stt_to_text():
 @app.route("/api/stt_to_text_speech", methods=["POST"])
 def stt_to_text_speech():
     """
-    録音ファイルを **そのまま** gpt-4o-mini-transcribe へ転送し、
-    英語 (language=en) で認識結果を返す。
-    日本語などが返った場合は 400。
+    受信した録音を Whisper v2 (gpt-4o-mini-transcribe) で
+    『英語のみ』文字起こしして返すエンドポイント。
+
+    * audio/webm・audio/wav → そのまま転送
+    * それ以外（iOS の audio/mp4 等）→ 16-kHz/mono/PCM WAV に変換
     """
     try:
-        fs      = request.files["audio"]
-        mime    = fs.mimetype or "application/octet-stream"
-        fname   = fs.filename or "speech_input"
+        fs    = request.files["audio"]                      # Werkzeug FileStorage
+        mime  = fs.mimetype  or "application/octet-stream"
+        fname = fs.filename or "speech_input"
 
-        # ------ ★ iOS (audio/mp4) をサーバで wav へ変換 -----------------
-        if mime == "audio/mp4":
-            try:
-                # ① Blob → AudioSegment
-                seg = AudioSegment.from_file(fs.stream, format="mp4")
-                # ② AudioSegment → WAV (16-kHz mono 16-bit)
-                buf = BytesIO()
-                seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
-                    .export(buf, format="wav")
-                buf.seek(0)
-                # ③ Whisper に渡すファイル一式を上書き
-                mime = "audio/wav"
-                fname = "speech.wav"
-                file_tuple = ("speech.wav", buf, mime)
-            except Exception as _:
-                # 変換失敗→そのまま mp4 で試みる（旧来挙動）
-                file_tuple = (fname, fs.stream, mime)
+        # --- ① 変換が必要か判定  ---------------------------------
+        NEED_CONVERT = mime not in {"audio/webm", "audio/wav"}
+
+        if NEED_CONVERT:
+            from io import BytesIO
+            from pydub import AudioSegment                  # ffmpeg 必須
+            # 1) 自動判別でデコード → 2) 16-kHz/mono/16-bit PCM WAV へ
+            seg = AudioSegment.from_file(fs.stream)
+            buf = BytesIO()
+            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
+               .export(buf, format="wav")
+            buf.seek(0)
+            file_tuple = ("speech.wav", buf, "audio/wav")
         else:
             file_tuple = (fname, fs.stream, mime)
-        # ---------------------------------------------------------------
+        # ----------------------------------------------------------
 
         whisper_url = (
             f"{AZURE_OPENAI_STT_ENDPOINT}/openai/deployments/"
@@ -1677,19 +1675,25 @@ def stt_to_text_speech():
         resp = requests.post(
             whisper_url,
             headers={"api-key": AZURE_OPENAI_STT_KEY},
-            files={"file": (fname, fs.stream, mime)},
-            data={
-                "response_format": "text",
-                "language": "en"          # ★ 英語モデルを強制
-            },
+            files={"file": file_tuple},
+            data={"response_format": "text", "language": "en"},  # 英語を強制
             timeout=90
         )
-        resp.raise_for_status()
+
+        # --- ② 失敗時に詳細をログへ ------------------------------
+        try:
+            resp.raise_for_status()       # ← 200 系ならスルー
+        except requests.HTTPError:
+            app.logger.error("Whisper detail: %s", resp.text)  # 本文を記録
+            raise                                               # 既存ハンドラへ
+        # ----------------------------------------------------------
+
         text = resp.text.strip()
 
-        # Whisper が空文字や "こんにちは" など返した場合に弾く
+        # --- ③ 英語以外なら 400 ----------------------------------
         if not text or re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", text):
-            return jsonify({"error": "英語を話してくださいね！No English language is detected"}), 400
+            return jsonify({"error": "英語を話してくださいね！No English detected"}), 400
+        # ----------------------------------------------------------
 
         return jsonify({"text": text})
 

@@ -22,6 +22,7 @@ import math
 from flask_mail import Mail, Message
 import secrets
 import tempfile
+import subprocess, tempfile, os, json, shlex
 
 
 # Load environment variables from .env file
@@ -1638,61 +1639,73 @@ def stt_to_text():
 @app.route("/api/stt_to_text_speech", methods=["POST"])
 def stt_to_text_speech():
     """
-    * audio/webm, audio/wav → そのまま Whisper v2 へ
-    * それ以外            → 16-kHz/mono/WAV に変換して Whisper v2 へ
-    Whisper 文字起こしが英語以外なら 400 を返す
+    1) blob をそのまま Whisper へ
+    2) 400 なら ffmpeg で 16-kHz/mono/WAV へ強制変換 → Whisper
+    Whisper が英語以外を返したら 400
     """
     try:
-        # ------------- 前処理（blob 取得・変換判定など）------------
         fs   = request.files["audio"]
         blob = fs.read()
         mime = fs.mimetype or "application/octet-stream"
         fname= fs.filename or "speech_input"
-        app.logger.info("STT upload: mime=%s, size=%d", mime, len(blob))
-        # まずは“そのまま”送る
-        file_tuple = (fname, BytesIO(blob), mime)
+        app.logger.info("STT upload: mime=%s size=%d", mime, len(blob))
 
-        # ---------- ★ ここで helper をネスト定義 ------------------
-        def call_whisper(file_tup):
-            whisper_url = (
-                f"{AZURE_OPENAI_STT_ENDPOINT.rstrip('/')}"
-                f"/openai/deployments/{AZURE_OPENAI_STT_DEPLOY}"
-                f"/audio/transcriptions?api-version={STT_API_VER}"
-            )
+        # ---------- helper ----------
+        def call_whisper(file_tuple):
+            url = (f"{AZURE_OPENAI_STT_ENDPOINT.rstrip('/')}"
+                   f"/openai/deployments/{AZURE_OPENAI_STT_DEPLOY}"
+                   f"/audio/transcriptions?api-version={STT_API_VER}")
             return requests.post(
-                whisper_url,
+                url,
                 headers={"api-key": AZURE_OPENAI_STT_KEY},
-                files={"file": file_tup},
-                data={"response_format": "text", "language": "en"},
+                files={"file": file_tuple},
+                data={"response_format":"text","language":"en"},
                 timeout=90
             )
-        # ----------------------------------------------------------
+        # -----------------------------
 
-        # -------- ① 1 回目（無変換） ------------------------------
-        resp = call_whisper(file_tuple)
+        resp = call_whisper((fname, BytesIO(blob), mime))
 
-        # --- ② 400 なら一律リトライ ---
+        # === 400 → 強制 WAV 変換して再送 ===
         if resp.status_code == 400:
-            app.logger.warning("Whisper 400 (%s) – retry as WAV", resp.text[:60])
+            app.logger.warning("Whisper 400 (%s)… retry WAV", resp.text[:120])
 
+            # 1) ffprobe でメタを残す
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as tin:
+                tin.write(blob)
+                tin.flush()
             try:
-                seg = AudioSegment.from_file(BytesIO(blob))  # 自動判別
+                meta = subprocess.check_output(
+                    ["ffprobe","-v","quiet","-print_format","json",
+                     "-show_streams",tin.name], text=True)
+                app.logger.info("ffprobe: %s", meta)
             except Exception as e:
-                app.logger.error("ffmpeg decode fail: %s", e)
-                return jsonify({"error": "Unsupported audio format"}), 400
+                app.logger.warning("ffprobe failed: %s", e)
 
-            wav_buf = BytesIO()
-            seg.set_frame_rate(16000).set_channels(1).set_sample_width(2) \
-                .export(wav_buf, format="wav")
-            wav_buf.seek(0)
-            resp = call_whisper(("speech.wav", wav_buf, "audio/wav"))
+            # 2) ffmpeg 変換
+            wav_path = tin.name + ".wav"
+            cmd = ["ffmpeg","-y","-i",tin.name,"-ar","16000","-ac","1",wav_path]
+            try:
+                subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                app.logger.error("ffmpeg convert fail:\n%s", e.output.decode())
+                return jsonify({"error":"Audio conversion failed"}), 400
 
-        # --- ③ 最終チェック ---
+            with open(wav_path,"rb") as f: wav_blob = f.read()
+            if len(wav_blob) < 2000:       # 0.1 秒未満なら壊れた録音
+                return jsonify({"error":"録音が短すぎます"}), 400
+
+            resp = call_whisper(("speech.wav", BytesIO(wav_blob), "audio/wav"))
+
+            # 後始末
+            os.remove(tin.name); os.remove(wav_path)
+
+        # === 最終判定 ===
         resp.raise_for_status()
-
         text = resp.text.strip()
+
         if not text or re.search(r"[\u3040-\u30ff\u4e00-\u9faf]", text):
-            return jsonify({"error": "英語を話してくださいね！"}), 400
+            return jsonify({"error":"英語を話してくださいね！"}), 400
 
         return jsonify({"text": text})
 

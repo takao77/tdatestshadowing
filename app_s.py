@@ -1650,6 +1650,30 @@ def stt_to_text_speech():
         blob   = fs.read()
         mime   = fs.mimetype or "application/octet-stream"
         fname  = fs.filename or "speech_input"
+
+        # ---------- ★ デバッグ用に保存・ログ出力する ---------- #
+        from pathlib import Path
+        import tempfile, os
+
+        # ① ─── 保存先を OS に合わせて動的に決める ──────────
+        #    Linux:  /tmp/last_ios_upload.mp4
+        #    macOS:  /tmp/last_ios_upload.mp4
+        #    Windows: %TEMP%\last_ios_upload.mp4  例) C:\Users\foo\AppData\Local\Temp
+        dbg_path = Path(tempfile.gettempdir()) / "last_ios_upload.mp4"
+
+        # ② ─── 親ディレクトリが無い場合は作る（念のため） ─────
+        dbg_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # ③ ─── バイト列を書き出す ───────────────────────
+        try:
+            dbg_path.write_bytes(blob)
+            app.logger.info("🛠 saved debug audio: %s (%d bytes)",
+                            dbg_path, dbg_path.stat().st_size)
+        except Exception as e:
+            # 失敗しても本処理は続ける
+            app.logger.warning("debug-save failed: %s", e)
+        # ------------------------------------------------------
+
         app.logger.info("STT upload: mime=%s, size=%d", mime, len(blob))
 
         # ----- ★ デバッグ用に一時保存 -----------------------

@@ -190,13 +190,13 @@
   </style>
 </head>
 <body>
-<!-- ここからデバッグ用（開発中だけ） ------------------------- -->
-<pre id="dbg"
-     style="background:#111;color:#0f0;font-size:.75rem;
-            padding:4px;max-height:40vh;overflow:auto;
-            position:fixed;      /* ← 追加 */
-            top:10px; left:100px; /* ← 追加（好きな座標に） */
-            z-index:2000;"></pre>
+<!--?ここからデバッグ用（開発中だけ） ------------------------- -->
+<!--?<pre id="dbg"-->
+<!--?     style="background:#111;color:#0f0;font-size:.75rem;-->
+<!--?            padding:4px;max-height:40vh;overflow:auto;-->
+<!--?            position:fixed;      /* ← 追加 */-->
+<!--?            top:10px; left:100px; /* ← 追加（好きな座標に） */-->
+<!--?            z-index:2000;"></pre>-->
 <!-- 左上の“家”アイコン (chimney-window付き) -->
 <a href="/home" class="home-link">
     <i class="fa-solid fa-house-chimney-window"></i>
@@ -365,18 +365,18 @@
 
 
 <!-- console.log を画面にもミラーする簡易スクリプト -->
-<script>
-    (function () {
-        const oldLog = console.log;
-        console.log = function (...args) {
-            oldLog.apply(console, args);                       // 元のログも維持
-            const el = document.getElementById('dbg');
-            if (el) {
-                el.textContent += args.map(String).join(' ') + '\n';
-            }
-        };
-    })();
-</script>
+<!--?<script>-->
+<!--?    (function () {-->
+<!--?        const oldLog = console.log;-->
+<!--?        console.log = function (...args) {-->
+<!--?            oldLog.apply(console, args);                       // 元のログも維持-->
+<!--?            const el = document.getElementById('dbg');-->
+<!--?            if (el) {-->
+<!--?                el.textContent += args.map(String).join(' ') + '\n';-->
+<!--?            }-->
+<!--?        };-->
+<!--?    })();-->
+<!--?</script>-->
 <!-- ↑↑ これより下で呼ばれる console.log はすべて <pre> に出ます ↑↑ -->
 <!-- ------------------------------------------------------------ -->
 
@@ -512,6 +512,16 @@
     }
 
     $(document).ready(async function() {
+        /* ★ iOS なら AI タブを非表示にする ------------------------ */
+        if (isIOS) {
+            $('#tab-ai').hide();     // 1) ボタン
+            $('#ai').remove();       // 2) コンテンツごと削除で安全
+        }
+        if (isIOS) {
+            $('#tab-record').hide();
+            $('#record').remove();
+        }
+
         const course = "{{ course }}";  // Get the course passed from the backend
 
         // Request microphone access once and store the stream
@@ -960,7 +970,7 @@
         /** 録音開始 */
         async function startAiRec() {
             const freshStream = await navigator.mediaDevices.getUserMedia({
-                audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}
+                audio: {echoCancellation: true, noiseSuppression: true}
             });
 
             aiChunks = [];

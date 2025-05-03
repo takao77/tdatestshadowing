@@ -50,11 +50,19 @@ a.logout:hover{background:#95a5a6}
   <button id="check-btn" class="btn">Check</button>
 
   <div id="result-msg"></div>
+<div style="margin:14px 0">
+  <button id="play-btn" class="icon-btn" title="Play sentence" style="display:none">
+      <i class="fas fa-volume-up"></i>
+  </button>
+  <audio id="tts-audio" style="display:none"></audio>
+</div>
   <button id="next-btn" class="btn" disabled>Next</button>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+
 <script>
+
 let cur=null;
 
 function loadNext(){
@@ -75,9 +83,11 @@ function loadNext(){
           $('#answer').attr('placeholder', '日本語の英語訳を入力');
       }
       $('#ef').text('EF: '+j.ef.toFixed(2));
+      $('#play-btn').hide();
   }).fail(()=>$('#prompt').text('Error'));
 }
 
+// 成否結果をDBに書き込むヘルパー関数
 function postResult(ok){
   const fd=new FormData();
   fd.append('vocab_id',cur.vocab_id);
@@ -85,10 +95,20 @@ function postResult(ok){
   return fetch('/api/review/result',{method:'POST',body:fd});
 }
 
+// 正規化ヘルパ
+const norm = s => s
+  .trim()              // 前後空白除去
+  .replace(/[.,!?]/g,'') // 句読点を無視したい場合
+  .replace(/\s+/g,' ') // 連続空白を 1 つに
+  .toLowerCase();      // 大文字・小文字無視
+
 $('#check-btn').on('click', async ()=>{
-  const ans = $('#answer').val().trim().replace(/\s+/g,' ').toLowerCase();
-  const correct = (cur.mode==='cloze' ? cur.answer : cur.word).toLowerCase();  // ★
-  if(!ans) return;
+
+    const ans = $('#answer').val().trim().replace(/\s+/g,' ').toLowerCase();
+
+    const correct = (cur.mode==='cloze' ? cur.answer : cur.word).toLowerCase();
+
+    if(!ans) return;
 
   const ok = ans === correct;
   await postResult(ok);
@@ -99,6 +119,31 @@ $('#check-btn').on('click', async ()=>{
   );
   $('#answer,#check-btn').prop('disabled',true);
   $('#next-btn').prop('disabled',false).focus();
+  $('#play-btn').show();
+});
+
+$('#play-btn').on('click', async ()=>{
+  if(!cur || !cur.full_sentence) return;
+
+  try{
+    const res = await fetch('/api/tts_b64',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text: cur.full_sentence})
+    });
+    const j = await res.json();
+    if(j.error){ alert(j.error); return; }
+
+    const b64 = j.audio_b64 || j.audio;   // ★ 両方試す
+    if(!b64){ alert('TTS response missing audio'); return; }
+
+    $('#tts-audio')
+       .attr('src','data:audio/mp3;base64,'+b64)
+       .get(0).play();
+  }catch(e){
+    console.error(e);
+    alert('Audio error');
+  }
 });
 
 $('#next-btn').on('click', loadNext);

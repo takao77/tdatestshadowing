@@ -2095,6 +2095,7 @@ def get_next_review():
         payload = {
             'mode': 'cloze',
             'sentence': clz,
+            'full_sentence': row.sentence,
             'answer': ans,
             'jp': jp,  # ★ 追加
             'vocab_id': row.id,
@@ -2107,7 +2108,8 @@ def get_next_review():
             'jp'       : jp,
             'word'     : row.word,
             'vocab_id' : row.id,
-            'ef'       : ef
+            'ef'       : ef,
+            'full_sentence': row.sentence
         }
     return jsonify(payload)
 
@@ -2148,6 +2150,25 @@ def review_page():
         return redirect(url_for('login_user'))   # 既存のログイン関数名
 
     return render_template('review.html')
+
+
+@app.route('/api/tts_b64', methods=['POST'])
+def api_tts_b64():
+    try:
+        data = request.get_json(force=True) or {}
+        text  = (data.get('text') or '').strip()
+        if not text:
+            return jsonify({'error': 'text is required'}), 400
+
+        voice = data.get('voice',  DEFAULT_VOICE)
+        style = data.get('style',  DEFAULT_STYLE)
+
+        audio_b64 = tts_to_b64(text, voice=voice, style=style)
+        return jsonify({'audio_b64': audio_b64})
+
+    except Exception as e:
+        app.logger.exception("TTS error: %s", e)
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route("/test_recorder")

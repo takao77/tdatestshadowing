@@ -23,6 +23,7 @@ from flask_mail import Mail, Message
 import secrets
 import tempfile
 import subprocess, tempfile, os, json, shlex
+from collections import namedtuple
 
 
 # Load environment variables from .env file
@@ -176,6 +177,16 @@ def get_db_connection():
     # pyodbcで接続
     conn = pyodbc.connect(conn_str)
     return conn
+
+
+def fetchone(sql, *params):
+    """1 行だけ返して接続を即クローズ。見つからなければ None"""
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute(sql, *params)
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    return row
 
 
 def log_practice_activity_db(user_id, course, sentence, word):
@@ -494,6 +505,195 @@ def tts_to_b64(
         raise RuntimeError(f"TTS canceled: {details.reason} - {details.error_details}")
 
     return base64.b64encode(result.audio_data).decode("ascii")
+
+
+# 返り値用の軽量コンテナ
+LatestReview = namedtuple('LatestReview', 'ef reps days_since')
+
+def get_latest_review(user_id: int, vocab_id: int):
+    """
+    指定ユーザー × 指定単語の直近レビュー情報を 1 行だけ取得して返す。
+
+    戻り値:
+        LatestReview(ef, reps, days_since)
+        - ef         : 直近の EF (なければ 2.5)
+        - reps       : 今回を含める前の累積レビュー回数
+        - days_since : 直近レビューから現在までの日数
+      もし履歴が無ければ None を返す。
+    """
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT TOP 1
+               ef,
+               review_time,
+               COUNT(*) OVER (PARTITION BY user_id, vocab_id) AS reps
+          FROM dbo.vocab_reviews
+         WHERE user_id = ? AND vocab_id = ?
+         ORDER BY review_time DESC
+    """, user_id, vocab_id)
+
+    row = cur.fetchone()
+    cur.close(); conn.close()
+
+    if not row:                       # 未学習
+        return None
+
+    # 経過日数 (0 日未満にならないようガード)
+    days = max((datetime.utcnow() - row.review_time).days, 0)
+
+    return LatestReview(
+        ef   = row.ef or 2.5,         # NULL のとき初期値 2.5
+        reps = row.reps,              # 直近レビュー以前の回数
+        days_since = days
+    )
+
+
+def execute(sql,*params):
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute(sql,*params); conn.commit()
+    cur.close(); conn.close()
+
+
+def translate_word_to_jp(word: str) -> str:
+    """
+    OpenAI (Azure) で英単語を 1 語の日本語に翻訳して返す。
+    失敗時は空文字列を返す。
+    """
+    prompt = f'次の英単語を日本語に翻訳して。およそ３語から５語で。さらに、この英単語の最初のアルファベットを書いてください。: "{word}"'
+    url = (f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"
+           f"{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15")
+    headers = {"Content-Type": "application/json", "api-key": AZURE_OPENAI_API_KEY}
+    data = {
+        "messages": [
+            {"role": "system",
+             "content": "You are a bilingual assistant. Output ONLY the Japanese translation."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 30,
+        "temperature": 0.3
+    }
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=20)
+        r.raise_for_status()
+        jp = r.json()["choices"][0]["message"]["content"].strip()
+        return jp.split('\n')[0]      # 複数行返ってきたら先頭だけ
+    except Exception as e:
+        app.logger.warning("translate_word_to_jp failed: %s", e)
+        return ""
+
+
+# Azure OpenAI 定数は既存のものを再利用
+CHAT_URL = (
+    f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"
+    f"{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15"
+)
+HEADERS  = {"Content-Type": "application/json", "api-key": AZURE_OPENAI_API_KEY}
+
+def ai_pick_token(sentence: str, lemma: str) -> str | None:
+    """
+    GPT に「lemma が句動詞やイディオムなら完全形を返せ」と要求。
+    戻り値が sentence に実在しない or 複数行の場合は None。
+    """
+    prompt = (
+        "From the sentence below, return EXACTLY the token or phrase "
+        "that corresponds to the given lemma.\n"
+        "- If the lemma is part of a multi-word phrasal verb or idiom, "
+        "return the *whole phrase* as it appears in the sentence.\n"
+        "- Output just that phrase. No extra words, no punctuation."
+        f"\nSentence: {sentence}\nLemma: {lemma}"
+    )
+    payload = {
+        "messages": [
+            {"role":"system",
+             "content":"You are a precise linguistic extractor. "
+                       "Return only the matched phrase."},
+            {"role":"user","content":prompt}
+        ],
+        "max_tokens": 10,"temperature":0
+    }
+    try:
+        res = requests.post(CHAT_URL, headers=HEADERS, json=payload, timeout=15)
+        res.raise_for_status()
+        phrase = res.json()["choices"][0]["message"]["content"].strip()
+        # 改行・余計な語がないか最小チェック
+        if "\n" in phrase or phrase.lower() not in sentence.lower():
+            return None
+        return phrase
+    except Exception as e:
+        app.logger.info("ai_pick_token error: %s", e)
+        return None
+
+
+PARTICLES = {"up","out","off","in","on","down","over","away","back","through"}
+
+def _local_fallback(sentence:str, lemma:str)->str|None:
+    """GPT が失敗した時用 ― 連続 n語 を類似度で探す"""
+    lemma_lc = lemma.lower()
+    l_parts  = lemma_lc.split()
+    n        = len(l_parts)
+    tokens   = re.findall(r"[A-Za-z']+", sentence)
+    best, best_score = None, 0.0
+
+    for i in range(len(tokens)-n+1):
+        cand = ' '.join(tokens[i:i+n]).lower()
+        sc   = difflib.SequenceMatcher(None, cand, lemma_lc).ratio()
+        if sc > best_score:
+            best, best_score = ' '.join(tokens[i:i+n]), sc
+
+    return best if best_score >= 0.6 else None
+
+
+def make_cloze(sentence: str, lemma: str) -> tuple[str,str]:
+    """
+    戻り値: (cloze_sentence, answer_phrase)
+      - answer_phrase は実際に空欄にした語句
+    """
+    # ---------- ① GPT で語句を取得 ----------
+    phrase = ai_pick_token(sentence, lemma)
+
+    # ---------- ② GPT が1語のみ返したら粒子を自動追加 ----------
+    if phrase and ' ' not in phrase:
+        patt = re.compile(r'\b' + re.escape(phrase) + r'\b\s+(\w+)', re.IGNORECASE)
+        m = patt.search(sentence)
+        if m and m.group(1).lower() in PARTICLES:
+            phrase = f"{phrase} {m.group(1)}"   # 例: fill out
+
+    # ---------- ③ まだ見つからなければローカル fallback ----------
+    if not phrase:
+        phrase = _local_fallback(sentence, lemma)
+
+    # ---------- ④ 置換 ----------
+    if phrase:
+        blanks = ' '.join('_'*len(w) for w in phrase.split())
+        clz    = re.sub(re.escape(phrase), blanks, sentence, count=1, flags=re.IGNORECASE)
+        return clz, phrase
+
+    # 最後の安全策: 置換せずそのまま
+    return sentence, lemma
+
+
+def translate_en_to_jp(text: str) -> str:
+    """
+    Azure OpenAI で英文を自然な日本語に翻訳して返す。
+    """
+    payload = {
+        "messages":[
+            {"role":"system","content":"You are a professional translator. "
+                                       "Translate the sentence into natural Japanese."},
+            {"role":"user","content": text}
+        ],
+        "max_tokens": 120,
+        "temperature": 0
+    }
+    r = requests.post(
+        CHAT_URL,           # 既に定義済み (AZURE_OPENAI_ENDPOINT …)
+        headers=HEADERS,    # 既に定義済み
+        json=payload,
+        timeout=15
+    )
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"].strip()
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1861,6 +2061,93 @@ Sentence: 「{sentence}」
     )
     b64 = base64.b64encode(audio).decode('utf-8')
     return jsonify({'text': jp_text, 'audio': b64})
+
+
+@app.route('/api/review/next')
+def get_next_review():
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error':'login'}),403
+
+    sql = """       -- EF 条件を外し “全語” 抽出
+    WITH latest AS(
+        SELECT vocab_id,ef,review_time,
+               ROW_NUMBER()OVER(PARTITION BY vocab_id ORDER BY review_time DESC) rn
+        FROM dbo.vocab_reviews WHERE user_id=?
+    )
+    SELECT TOP 1 vi.id,vi.word,vi.sentence,lat.ef
+      FROM latest lat
+      JOIN dbo.vocab_items vi ON vi.id=lat.vocab_id
+     WHERE lat.rn=1
+       AND lat.review_time<=DATEADD(minute,-10,GETUTCDATE())
+     ORDER BY lat.ef ASC,lat.review_time ASC,NEWID()"""
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute(sql,uid); row=cur.fetchone()
+    cur.close(); conn.close()
+
+    if not row:
+        return jsonify({'finished':True})
+
+    ef = float(row.ef)
+    if ef < 5:
+        clz, ans = make_cloze(row.sentence, row.word)
+        jp = translate_en_to_jp(row.sentence)  # ★ 追加
+        payload = {
+            'mode': 'cloze',
+            'sentence': clz,
+            'answer': ans,
+            'jp': jp,  # ★ 追加
+            'vocab_id': row.id,
+            'ef': ef
+        }
+    else:
+        jp = translate_word_to_jp(row.word)
+        payload = {
+            'mode'     :'jp',
+            'jp'       : jp,
+            'word'     : row.word,
+            'vocab_id' : row.id,
+            'ef'       : ef
+        }
+    return jsonify(payload)
+
+
+
+@app.route('/api/review/result', methods=['POST'])
+def post_review_result():
+    uid       = session.get('user_id')
+    vocab_id  = int(request.form['vocab_id'])
+    is_correct= request.form.get('correct') == '1'
+    score     = 5 if is_correct else 1
+
+    # 直近データを取得（EF,回数,経過日数 計算）
+    prev = get_latest_review(uid, vocab_id)   # helper
+    new_ef = calculate_ef_with_decay(
+        ef_old    = prev.ef if prev else 2.5,
+        self_score= score,
+        repetitions= (prev.reps+1) if prev else 1,
+        days_since = prev.days_since if prev else 0
+    )
+
+    next_on = datetime.utcnow() + timedelta(days=new_ef)
+    sql = """INSERT INTO dbo.vocab_reviews
+               (user_id,vocab_id,review_time,self_score,ef,next_review)
+             VALUES (?,?,?,?,?,?)"""
+    execute(sql, uid, vocab_id, datetime.utcnow(), score, new_ef, next_on)
+    return jsonify({'ef': round(new_ef,2)})
+
+
+# app.py（または app_s.py など）に追加
+@app.route('/review')
+def review_page():
+    """
+    復習ページ（review.html）を返すだけの GET ルート。
+    ユーザー未ログインなら /login へリダイレクト。
+    """
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))   # 既存のログイン関数名
+
+    return render_template('review.html')
 
 
 @app.route("/test_recorder")

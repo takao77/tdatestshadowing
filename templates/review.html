@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Review</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous"/>
+<style>
+:root{--bg:#1e1e1e;--blue:#3498db;--blue-light:#5dade2;--text:#fff;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Raleway',sans-serif;
+     display:flex;justify-content:center;align-items:center;min-height:100vh;}
+.container{background:rgba(40,40,40,.85);max-width:540px;width:92%;padding:28px 26px;
+           border-radius:14px;box-shadow:0 4px 20px rgba(0,0,0,.3);text-align:center;position:relative;}
+h1{font-size:1.25rem;margin:0 0 22px}
+#jp{font-size:1.2rem;font-weight:600;margin:6px 0 12px;color:var(--blue-light);}
+#ef{font-size:.85rem;opacity:.8;margin-bottom:10px;}
+#result-msg{margin-top:12px;font-size:1rem;}
+input#answer{width:100%;padding:10px;border-radius:6px;border:none;font-size:1rem;}
+.btn{margin-top:20px;padding:10px 26px;font-size:1rem;border:none;border-radius:50px;
+     background:var(--blue);color:#fff;cursor:pointer;transition:background .2s;}
+.btn:hover{background:#2980b9}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+#next-btn{margin-top:26px;}
+a.home,a.logout{position:absolute;top:18px;color:#fff;text-decoration:none}
+a.home{left:20px;font-size:30px}
+a.logout{right:20px;padding:8px 14px;background:#7f8c8d;border-radius:6px}
+a.logout:hover{background:#95a5a6}
+@media(max-width:600px){
+  body{align-items:flex-start;padding-top:70px}
+  .container{width:100%;height:calc(100vh - 90px);overflow-y:auto}
+}
+</style>
+</head>
+<body>
+
+<a href="/home" class="home"><i class="fa-solid fa-house-chimney-window"></i></a>
+<a href="/logout" class="logout">Logout</a>
+
+<div class="container">
+  <h1>Review</h1>
+
+  <div id="prompt">Loading…</div>        <!-- sentence or JP -->
+    <div id="jp-trans" style="margin-top:6px;opacity:.8;font-size:.9rem;"></div>
+    <div id="ef"></div>
+
+  <input id="answer" placeholder="" autocomplete="off">
+  <button id="check-btn" class="btn">Check</button>
+
+  <div id="result-msg"></div>
+  <button id="next-btn" class="btn" disabled>Next</button>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script>
+let cur=null;
+
+function loadNext(){
+  $('#prompt').text('Loading…'); $('#ef,#result-msg').text('');
+  $('#answer').val('').prop('disabled',false).focus();
+  $('#check-btn').prop('disabled',false); $('#next-btn').prop('disabled',true);
+
+  $.getJSON('/api/review/next').done(j=>{
+      if(j.finished){ $('#prompt').text('🎉 今日は完了！'); $('#answer,#check-btn').prop('disabled',true); return;}
+      cur=j;
+      if (j.mode === 'cloze') {
+          $('#prompt').text(j.sentence);
+          $('#jp-trans').text(j.jp || '');
+          $('#answer').attr('placeholder', '空欄を埋める英単語 / 句動詞');
+      } else {                    // mode === 'jp'
+          $('#prompt').text(j.jp);
+          $('#jp-trans').text('');        // 訳は不要
+          $('#answer').attr('placeholder', '日本語の英語訳を入力');
+      }
+      $('#ef').text('EF: '+j.ef.toFixed(2));
+  }).fail(()=>$('#prompt').text('Error'));
+}
+
+function postResult(ok){
+  const fd=new FormData();
+  fd.append('vocab_id',cur.vocab_id);
+  fd.append('correct', ok?'1':'0');
+  return fetch('/api/review/result',{method:'POST',body:fd});
+}
+
+$('#check-btn').on('click', async ()=>{
+  const ans = $('#answer').val().trim().replace(/\s+/g,' ').toLowerCase();
+  const correct = (cur.mode==='cloze' ? cur.answer : cur.word).toLowerCase();  // ★
+  if(!ans) return;
+
+  const ok = ans === correct;
+  await postResult(ok);
+
+  $('#result-msg').html(
+      ok ? '✅ Correct!' :
+      `❌ Wrong… correct answer is <b>${cur.answer || cur.word}</b>`
+  );
+  $('#answer,#check-btn').prop('disabled',true);
+  $('#next-btn').prop('disabled',false).focus();
+});
+
+$('#next-btn').on('click', loadNext);
+$(loadNext);
+
+</script>
+</body>
+</html>

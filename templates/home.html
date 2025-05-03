@@ -121,11 +121,49 @@
             cursor:pointer;transition:background .3s;
         }
         .logout-btn:hover{background:#95a5a6;}
+        /* ★ new – review icon (center-top) */
+        .review-btn{
+            position:absolute;
+            top:18px;                 /* Logout ボタンと同じ高さ */
+            left:50%;
+            transform:translateX(-50%);
+            font-size:3.2rem;
+            color:var(--blue);
+            background:none;border:none;cursor:pointer;
+            transition:transform .2s,color .3s;
+        }
+        .review-btn:hover{transform:scale(1.15);color:var(--blue-light);}
+        @media(max-width:600px){
+            .review-btn{top:14px;font-size:2rem;}
+            h1{margin-top:64px;}      /* アイコン分だけ見出しを少し下げる */
+        }
+        /* ── tooltip ─────────────────────────────── */
+        .review-btn[data-tip]::after{
+            content:attr(data-tip);
+            position:absolute;
+            bottom:-38px;                 /* ボタンの真下 */
+            left:50%; transform:translateX(-50%);
+            white-space:nowrap;
+            background:#000d;             /* 半透明黒 */
+            padding:6px 10px;
+            border-radius:6px;
+            font-size:.8rem;
+            opacity:0; pointer-events:none;
+            transition:opacity .2s;
+        }
+        .review-btn:hover::after{opacity:1;}
     </style>
 </head>
 <body>
 
     <button class="logout-btn" onclick="location.href='/logout'"><i class="fas fa-sign-out-alt"></i> Logout</button>
+
+    <!-- ★ 追加：復習モード アイコン -->
+    <button class="review-btn"
+            data-tip="これまでの学習履歴から復習する"
+            onclick="location.href='/review'">
+        <i class="fas fa-clock-rotate-left"></i>
+    </button>
 
     <main style="text-align:center;width:100%">
         <h1>Select Your Course</h1>

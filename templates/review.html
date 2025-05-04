@@ -32,6 +32,48 @@ a.logout:hover{background:#95a5a6}
   body{align-items:flex-start;padding-top:70px}
   .container{width:100%;height:calc(100vh - 90px);overflow-y:auto}
 }
+
+.rec-btn,
+.stop-btn{
+  background:#FF3B30;   /* Signal Red */
+  color:#fff;
+  transition:background .2s;
+}
+
+.rec-btn:hover,
+.stop-btn:hover{
+  background:#e12e24;   /* 少し暗いトーンへ */
+}
+
+.icon-btn.glossy{
+  width:28px;           /* ▼ 小さく */
+  height:28px;
+  margin:0 auto;        /* ▼ 中央寄せ */
+  display:block;
+  border-radius:50%;
+  background:linear-gradient(#5dade2,#3498db);
+  border:none;
+  color:#fff;
+  cursor:pointer;
+  box-shadow:0 2px 4px rgba(0,0,0,.4);
+  transition:transform .15s;
+}
+
+.icon-btn.glossy:hover{
+  transform:scale(1.12);
+  box-shadow:
+      0 6px 16px rgba(0,0,0,.8),
+      0 0 0 4px #76c7ff inset;
+}
+.icon-btn.glossy:active{transform:scale(.95);}
+
+@keyframes pulse{
+  0%{ box-shadow:0 0 0 4px #5dade2 inset; }
+  50%{ box-shadow:0 0 0 8px #5dade2 inset; }
+  100%{ box-shadow:0 0 0 4px #5dade2 inset; }
+}
+.icon-btn.glossy.playing{ animation:pulse 1s infinite; }
+
 </style>
 </head>
 <body>
@@ -43,10 +85,11 @@ a.logout:hover{background:#95a5a6}
   <h1>Review</h1>
 
 <div id="player-wrap" style="margin:10px 0">
-  <button id="play-btn" class="icon-btn" title="Play sentence" style="display:none">
+  <button id="play-btn" class="icon-btn glossy" title="Play sentence" style="display:none">
       <i class="fas fa-volume-up"></i>
   </button>
   <audio id="tts-audio" style="display:none"></audio>
+    <audio id="rec-audio" style="display:none"></audio>
 </div>
 
   <div id="prompt">Loading…</div>        <!-- sentence or JP -->
@@ -54,6 +97,17 @@ a.logout:hover{background:#95a5a6}
     <div id="ef"></div>
 
   <input id="answer" placeholder="" autocomplete="off">
+
+    <!-- 録音開始 -->
+    <button id="rec-btn" class="btn rec-btn" style="margin-top:14px;">
+        <i class="fas fa-microphone"></i> Rec
+    </button>
+
+    <!-- 録音停止 -->
+    <button id="stop-btn" class="btn stop-btn" style="display:none;margin-left:8px;">
+        <i class="fas fa-stop"></i> Stop
+    </button>
+
   <button id="check-btn" class="btn">Check</button>
 
   <div id="result-msg"></div>
@@ -66,6 +120,9 @@ a.logout:hover{background:#95a5a6}
 <script>
 
 let cur=null;
+let mediaRec      = null;   // MediaRecorder インスタンス
+let chunks        = [];     // 録音データ
+let autoId        = null;   // 自動停止タイマー ID
 
 /* ▼ ① レーベンシュタイン距離（最小編集距離） */
 function lev(a,b){
@@ -109,6 +166,7 @@ function loadNext(){
           $('#play-btn').show().off('click').on('click', ()=> {
             $('#tts-audio').get(0).currentTime = 0;
             $('#tts-audio').get(0).play();
+            $('#play-btn').addClass('playing');
           });
       }
       $('#ef').text('EF: '+j.ef.toFixed(2));
@@ -124,9 +182,27 @@ function postResult(score){
 }
 
 // 正規化ヘルパ
+// 正規化ヘルパ ― 縮約を展開してから英字だけ残す
 const norm = s => s
-    .toLowerCase()          // 大文字・小文字を同一視
-    .replace(/[^a-z]/g,''); // 英字以外（空白・ハイフン・句読点など）を全部削除
+    .toLowerCase()
+    .replace(/’/g, "'")             // 全角/スマート引用 → '
+    // ── 縮約形を「展開形」に統一 ────────────────────
+    .replace(/\bi'm\b/g,  'i am')
+    .replace(/\byou're\b/g,'you are')
+    .replace(/\bhe's\b/g, 'he is')
+    .replace(/\bshe's\b/g,'she is')
+    .replace(/\bit's\b/g, 'it is')
+    .replace(/\bwe're\b/g,'we are')
+    .replace(/\bthey're\b/g,'they are')
+    .replace(/\bthat's\b/g,'that is')
+    .replace(/\bthere's\b/g,'there is')
+    .replace(/\bcan't\b/g,'cannot')
+    .replace(/\bwon't\b/g,'will not')
+    .replace(/\bdon't\b/g,'do not')
+    // ここに頻出パターンを追加していけます
+    // ──────────────────────────────────────────
+    .replace(/[^a-z]/g,'');         // 英字以外を削除
+
 
 $('#check-btn').on('click', async ()=>{
 
@@ -190,6 +266,66 @@ $('#play-btn').on('click', async ()=>{
 
 $('#next-btn').on('click', loadNext);
 $(loadNext);
+
+
+/* ▼ 録音開始 -------------------------------- */
+async function startRec(){
+  try{
+    const stream   = await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRec       = new MediaRecorder(stream);
+    chunks.length  = 0;
+
+    mediaRec.ondataavailable = e => chunks.push(e.data);
+    mediaRec.onstop          = sendRec;   // ← 録音終了後に送信
+
+    mediaRec.start();
+
+    /* 10 秒で自動停止 */
+    autoId = setTimeout(stopRec, 10_000);
+
+    /* UI 切替 */
+    $('#rec-btn').prop('disabled', true);
+    $('#stop-btn').show();
+  }catch(err){
+    alert('🎤 マイクが使えません: ' + err);
+  }
+}
+
+/* ▼ 手動／自動共通: 録音停止 ------------------ */
+function stopRec(){
+  if(!mediaRec || mediaRec.state !== 'recording') return;
+  clearTimeout(autoId);
+  mediaRec.stop();           // onstop で sendRec が呼ばれる
+
+  /* UI 戻す */
+  $('#rec-btn').prop('disabled', false);
+  $('#stop-btn').hide();
+}
+
+/* ▼ 録音データを送信 --------------------------- */
+async function sendRec(){
+  const blob = new Blob(chunks, {type:'audio/webm'});
+  const fd   = new FormData();
+  fd.append('audio', blob, 'speech.webm');
+
+  try{
+    const res = await fetch('/api/stt_to_text', {method:'POST', body:fd});
+    const j   = await res.json();
+    if(j.text){
+      $('#answer').val(j.text).focus();        // テキストを入力欄へ
+    }else{
+      alert(j.error || 'STT error');
+    }
+  }catch(e){
+    console.error(e);
+    alert('Upload failed');
+  }
+}
+
+/* ▼ イベント登録 ------------------------------- */
+$('#rec-btn').on('click', startRec);   // 録音開始
+$('#stop-btn').on('click', stopRec);   // 手動停止
+
 
 </script>
 </body>

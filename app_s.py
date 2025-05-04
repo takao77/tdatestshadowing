@@ -555,31 +555,49 @@ def execute(sql,*params):
     cur.close(); conn.close()
 
 
-def translate_word_to_jp(word: str) -> str:
+def translate_en_to_jp(text: str) -> str:
     """
-    OpenAI (Azure) で英単語を 1 語の日本語に翻訳して返す。
-    失敗時は空文字列を返す。
+    Azure OpenAI で英文を自然な日本語に翻訳して返す。
+    message.content が無い／content-filter で弾かれた場合は空文字列を返す。
     """
-    prompt = f'次の英単語を日本語に翻訳して。およそ３語から５語で。さらに、この英単語の最初のアルファベットを書いてください。: "{word}"'
-    url = (f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"
-           f"{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15")
-    headers = {"Content-Type": "application/json", "api-key": AZURE_OPENAI_API_KEY}
-    data = {
+    payload = {
         "messages": [
             {"role": "system",
-             "content": "You are a bilingual assistant. Output ONLY the Japanese translation."},
-            {"role": "user", "content": prompt}
+             "content": "You are a professional translator. "
+                        "Translate the sentence into natural Japanese."},
+            {"role": "user", "content": text}
         ],
-        "max_tokens": 30,
-        "temperature": 0.3
+        "max_tokens": 120,
+        "temperature": 0.0
     }
+
     try:
-        r = requests.post(url, headers=headers, json=data, timeout=20)
-        r.raise_for_status()
-        jp = r.json()["choices"][0]["message"]["content"].strip()
-        return jp.split('\n')[0]      # 複数行返ってきたら先頭だけ
+        res = requests.post(CHAT_URL, headers=HEADERS,
+                            json=payload, timeout=20)
+        res.raise_for_status()
+        data = res.json()
+
+        # ---------- safe lookup ----------
+        content = (
+            data.get("choices", [{}])[0]
+                .get("message", {})        # regular response
+                .get("content")
+            or data.get("choices", [{}])[0]
+                .get("delta", {})          # streaming-style chunk
+                .get("content")
+        )
+
+        if content:
+            return content.strip()
+
+        app.logger.warning(
+            "translate_en_to_jp: no content (finish_reason=%s)",
+            data.get("choices", [{}])[0].get("finish_reason")
+        )
+        return ""          # fall back with empty string
+
     except Exception as e:
-        app.logger.warning("translate_word_to_jp failed: %s", e)
+        app.logger.exception("translate_en_to_jp failed: %s", e)
         return ""
 
 
@@ -671,29 +689,6 @@ def make_cloze(sentence: str, lemma: str) -> tuple[str,str]:
 
     # 最後の安全策: 置換せずそのまま
     return sentence, lemma
-
-
-def translate_en_to_jp(text: str) -> str:
-    """
-    Azure OpenAI で英文を自然な日本語に翻訳して返す。
-    """
-    payload = {
-        "messages":[
-            {"role":"system","content":"You are a professional translator. "
-                                       "Translate the sentence into natural Japanese."},
-            {"role":"user","content": text}
-        ],
-        "max_tokens": 120,
-        "temperature": 0
-    }
-    r = requests.post(
-        CHAT_URL,           # 既に定義済み (AZURE_OPENAI_ENDPOINT …)
-        headers=HEADERS,    # 既に定義済み
-        json=payload,
-        timeout=15
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -2089,38 +2084,50 @@ def get_next_review():
         return jsonify({'finished':True})
 
     ef = float(row.ef)
+
+    # ――― ① EF < 5 → cloze ―――
     if ef < 5:
         clz, ans = make_cloze(row.sentence, row.word)
-        jp = translate_en_to_jp(row.sentence)  # ★ 追加
-        payload = {
+        jp = translate_en_to_jp(row.sentence)
+        return jsonify({
             'mode': 'cloze',
             'sentence': clz,
             'full_sentence': row.sentence,
             'answer': ans,
-            'jp': jp,  # ★ 追加
+            'jp': jp,
             'vocab_id': row.id,
             'ef': ef
-        }
-    else:
-        jp = translate_word_to_jp(row.word)
-        payload = {
-            'mode'     :'jp',
-            'jp'       : jp,
-            'word'     : row.word,
-            'vocab_id' : row.id,
-            'ef'       : ef,
-            'full_sentence': row.sentence
-        }
-    return jsonify(payload)
+        })
 
+    # ――― ② 5 ≦ EF < 6 → JP ➜ EN 変換 ―――
+    if ef < 6:
+        jp = translate_word_to_jp(row.word)  # ← 1行日本語
+        return jsonify({
+            'mode': 'jp',
+            'jp': jp,
+            'word': row.word,
+            'full_sentence': row.sentence,
+            'vocab_id': row.id,
+            'ef': ef
+        })
+
+    # ――― ③ EF ≥ 6 → ディクテーション ―――
+    # （sentence を全文 TTS して base64 で渡す）
+    audio_b64 = tts_to_b64(row.sentence)
+    return jsonify({
+        'mode': 'dict',
+        'audio': audio_b64,  # ★ text は送らない
+        'full_sentence': row.sentence,  # 判定用
+        'vocab_id': row.id,
+        'ef': ef
+    })
 
 
 @app.route('/api/review/result', methods=['POST'])
 def post_review_result():
     uid       = session.get('user_id')
     vocab_id  = int(request.form['vocab_id'])
-    is_correct= request.form.get('correct') == '1'
-    score     = 5 if is_correct else 1
+    score    = int(request.form['score'])
 
     # 直近データを取得（EF,回数,経過日数 計算）
     prev = get_latest_review(uid, vocab_id)   # helper
@@ -2139,7 +2146,6 @@ def post_review_result():
     return jsonify({'ef': round(new_ef,2)})
 
 
-# app.py（または app_s.py など）に追加
 @app.route('/review')
 def review_page():
     """

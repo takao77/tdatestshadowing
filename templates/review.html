@@ -42,6 +42,13 @@ a.logout:hover{background:#95a5a6}
 <div class="container">
   <h1>Review</h1>
 
+<div id="player-wrap" style="margin:10px 0">
+  <button id="play-btn" class="icon-btn" title="Play sentence" style="display:none">
+      <i class="fas fa-volume-up"></i>
+  </button>
+  <audio id="tts-audio" style="display:none"></audio>
+</div>
+
   <div id="prompt">Loading…</div>        <!-- sentence or JP -->
     <div id="jp-trans" style="margin-top:6px;opacity:.8;font-size:.9rem;"></div>
     <div id="ef"></div>
@@ -50,12 +57,7 @@ a.logout:hover{background:#95a5a6}
   <button id="check-btn" class="btn">Check</button>
 
   <div id="result-msg"></div>
-<div style="margin:14px 0">
-  <button id="play-btn" class="icon-btn" title="Play sentence" style="display:none">
-      <i class="fas fa-volume-up"></i>
-  </button>
-  <audio id="tts-audio" style="display:none"></audio>
-</div>
+
   <button id="next-btn" class="btn" disabled>Next</button>
 </div>
 
@@ -65,6 +67,21 @@ a.logout:hover{background:#95a5a6}
 
 let cur=null;
 
+/* ▼ ① レーベンシュタイン距離（最小編集距離） */
+function lev(a,b){
+  const m=a.length,n=b.length,dp=[...Array(m+1)].map(()=>Array(n+1).fill(0));
+  for(let i=0;i<=m;i++) dp[i][0]=i;
+  for(let j=0;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++)
+    for(let j=1;j<=n;j++)
+      dp[i][j]=Math.min(
+        dp[i-1][j]+1,
+        dp[i][j-1]+1,
+        dp[i-1][j-1]+(a[i-1]===b[j-1]?0:1)
+      );
+  return dp[m][n];
+}
+
 function loadNext(){
   $('#prompt').text('Loading…'); $('#ef,#result-msg').text('');
   $('#answer').val('').prop('disabled',false).focus();
@@ -73,54 +90,79 @@ function loadNext(){
   $.getJSON('/api/review/next').done(j=>{
       if(j.finished){ $('#prompt').text('🎉 今日は完了！'); $('#answer,#check-btn').prop('disabled',true); return;}
       cur=j;
+      $('#play-btn').hide();
       if (j.mode === 'cloze') {
           $('#prompt').text(j.sentence);
           $('#jp-trans').text(j.jp || '');
           $('#answer').attr('placeholder', '空欄を埋める英単語 / 句動詞');
-      } else {                    // mode === 'jp'
+      } else if(j.mode==='jp'){
           $('#prompt').text(j.jp);
           $('#jp-trans').text('');        // 訳は不要
           $('#answer').attr('placeholder', '日本語の英語訳を入力');
+      }else if(j.mode==='dict'){
+          $('#prompt').text('🎧 Listen and type the sentence');
+          $('#jp-trans').text('');
+          $('#answer').attr('placeholder', 'Type what you hear');
+          // すぐ音声再生
+          $('#tts-audio').attr('src', 'data:audio/mp3;base64,' + j.audio).get(0).play();
+
+          $('#play-btn').show().off('click').on('click', ()=> {
+            $('#tts-audio').get(0).currentTime = 0;
+            $('#tts-audio').get(0).play();
+          });
       }
       $('#ef').text('EF: '+j.ef.toFixed(2));
-      $('#play-btn').hide();
   }).fail(()=>$('#prompt').text('Error'));
 }
 
 // 成否結果をDBに書き込むヘルパー関数
-function postResult(ok){
+function postResult(score){
   const fd=new FormData();
   fd.append('vocab_id',cur.vocab_id);
-  fd.append('correct', ok?'1':'0');
+  fd.append('score',score);          // ← correct ではなく score
   return fetch('/api/review/result',{method:'POST',body:fd});
 }
 
 // 正規化ヘルパ
 const norm = s => s
-  .trim()              // 前後空白除去
-  .replace(/[.,!?]/g,'') // 句読点を無視したい場合
-  .replace(/\s+/g,' ') // 連続空白を 1 つに
-  .toLowerCase();      // 大文字・小文字無視
+    .toLowerCase()          // 大文字・小文字を同一視
+    .replace(/[^a-z]/g,''); // 英字以外（空白・ハイフン・句読点など）を全部削除
 
 $('#check-btn').on('click', async ()=>{
 
-    const ans = $('#answer').val().trim().replace(/\s+/g,' ').toLowerCase();
+    const ansNorm = norm($('#answer').val());
+    if (!ansNorm) return;
+    const target = norm(cur.mode === 'cloze' ? cur.answer
+            : cur.mode === 'jp' ? cur.word
+                    : cur.full_sentence);  // dict は全文
 
-    const correct = (cur.mode==='cloze' ? cur.answer : cur.word).toLowerCase();
+    const dist = lev(ansNorm, target);
+    let score, msg;
+    if (dist === 0) {                     // 完全一致
+        score = 5;
+        msg = '✅ Perfect!';
+    } else if (dist <= 2) {                // ±2文字以内
+        score = 3;
+        msg = `💡 Almost! (${dist} typo${dist>1?'s':''})<br>
+            Correct: <b>${
+                cur.mode==='dict'
+                    ? cur.full_sentence
+                    : (cur.answer || cur.word)
+            }</b>`;
+    } else {
+        score = 1;
+        msg = `❌ Correct: <b>${cur.mode==='dict'
+                ? cur.full_sentence
+                : (cur.answer||cur.word)}</b>`;
+    }
+    await postResult(score);
 
-    if(!ans) return;
-
-  const ok = ans === correct;
-  await postResult(ok);
-
-  $('#result-msg').html(
-      ok ? '✅ Correct!' :
-      `❌ Wrong… correct answer is <b>${cur.answer || cur.word}</b>`
-  );
-  $('#answer,#check-btn').prop('disabled',true);
-  $('#next-btn').prop('disabled',false).focus();
-  $('#play-btn').show();
+    $('#result-msg').html(msg);
+    $('#answer,#check-btn').prop('disabled', true);
+    $('#next-btn').prop('disabled', false).focus();
+    $('#play-btn').show();                      // 回答後に表示
 });
+
 
 $('#play-btn').on('click', async ()=>{
   if(!cur || !cur.full_sentence) return;

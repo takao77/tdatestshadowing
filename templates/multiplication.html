@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liona's Multiplication Practice</title>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    :root { --bg:#f5f7fa; --card:#fff; --accent:#3498db; --accent-light:#5dade2; --text:#2c3e50; --correct:#2ecc71; --wrong:#e74c3c; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:'Raleway',sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:1rem;}
+    .card{background:var(--card);border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:2rem 2.5rem;width:100%;max-width:520px;text-align:center;}
+    h1{font-size:1.6rem;margin:0 0 1.2rem}
+    #question{font-size:2.2rem;font-weight:600;margin-bottom:1.5rem}
+    input[type="number"]{width:140px;padding:10px 12px;font-size:1.2rem;border:2px solid var(--accent);border-radius:8px;text-align:center;outline:none}
+    button{background:var(--accent);border:none;color:#fff;font-size:1.1rem;padding:10px 18px;border-radius:8px;cursor:pointer;transition:background .25s}
+    button:hover{background:var(--accent-light)}
+    #feedback{margin-top:1.3rem;font-size:1.2rem;min-height:1.4em}
+    #score{margin-top:.8rem;font-size:1rem;opacity:.8}
+    .mic-btn{border-radius:50%;width:48px;height:48px;display:inline-flex;align-items:center;justify-content:center;font-size:1.4rem;margin-left:.75rem;background:var(--accent);transition:background .25s,transform .15s}
+    .mic-btn.active{background:var(--wrong)}
+    .mic-btn:hover{transform:scale(1.08)}
+    .hint{font-size:.85rem;opacity:.75;margin-top:.6rem}
+    #transcript{margin-top:.4rem;font-size:.95rem;color:#555;min-height:1.2em;font-style:italic}
+
+    .stats-link {
+        position: absolute;
+        top: 18px;
+        right: 18px;
+        font-size: 1.8rem;
+        color: var(--accent);
+        text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a href="/multiplication_dashboard" class="stats-link"
+       title="View Stats"><i class="fas fa-chart-bar"></i></a>
+    <h1><i class="fas fa-heart"></i> Hi Liona! Let's Practice Multiplication!</h1>
+    <div id="question"></div>
+    <form id="answer-form" autocomplete="off" style="display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:.5rem">
+      <input type="number" id="answer-input" required placeholder="?">
+      <button type="submit">Check</button>
+      <button type="button" id="mic-toggle" class="mic-btn" title="Stop &amp; check"><i class="fas fa-microphone-slash"></i></button>
+    </form>
+    <div id="feedback"></div>
+    <div id="transcript"></div>
+    <div id="score"></div>
+    <p class="hint">Recording starts automatically. Speak your answer, then tap the mic to check—or just type.</p>
+  </div>
+
+<script>
+const qEl=document.getElementById('question');
+const form=document.getElementById('answer-form');
+const input=document.getElementById('answer-input');
+const feedback=document.getElementById('feedback');
+const transcriptEl=document.getElementById('transcript');
+const scoreEl=document.getElementById('score');
+const micBtn=document.getElementById('mic-toggle');
+
+let a,b,correctAns,total=0,correct=0;
+
+/* ============ BACK‑END LOG ============ */
+async function logAttempt(answer, isCorrect){
+  try{
+    await fetch('/api/multiplication_log',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        expression:`${a}*${b}`,
+        answer,
+        correct:isCorrect
+      })
+    });
+  }catch(e){console.warn('log failed',e)}
+}
+
+/* ==== Speech (MediaRecorder + optional Web Speech) ==== */
+const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent);
+let rec,chunks=[],stream,recording=false;
+let speechRec=null,liveTranscript='';
+function chooseMime(){
+  if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))return'audio/webm;codecs=opus';
+  if(MediaRecorder.isTypeSupported('audio/webm'))return'audio/webm';
+  if(MediaRecorder.isTypeSupported('audio/mp4'))return'audio/mp4';
+  return'';
+}
+async function startRec(){
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    rec=new MediaRecorder(stream,{mimeType:chooseMime()});
+    chunks=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.start();
+    recording=true;micBtn.classList.add('active');
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(SR){speechRec=new SR();speechRec.lang='en-US';speechRec.continuous=true;speechRec.interimResults=true;
+      speechRec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){interim+=e.results[i][0].transcript}liveTranscript=interim.trim();transcriptEl.textContent=liveTranscript?`You said: "${liveTranscript}"`:'';};speechRec.start();}
+  }catch(err){alert('🎤 Microphone unavailable');}}
+function stopRec(){return new Promise(res=>{if(!rec){res(null);return;}rec.onstop=()=>{const blob=new Blob(chunks,{type:chunks[0]?.type||'audio/webm'});stream.getTracks().forEach(t=>t.stop());micBtn.classList.remove('active');recording=false;if(speechRec){speechRec.stop();speechRec=null;}res(blob);};rec.stop();});}
+async function sttWhisper(blob){const fd=new FormData();fd.append('audio',blob,isIOS?'speech.mp4':'speech.webm');const r=await fetch('/api/stt_to_text_speech',{method:'POST',body:fd});return r.json();}
+
+/* ---- number extraction ---- */
+const numMap={one:1,won:1,two:2,to:2,too:2,three:3,tree:3,four:4,for:4,five:5,fine:5,six:6,sex:6,seven:7,eight:8,ate:8,nine:9,ten:10};
+function extractNumber(txt){txt=txt.toLowerCase();const d=txt.match(/\d+/);if(d)return parseInt(d[0],10);const tokens=txt.replace(/[^a-z\s]/g,' ').split(/\s+/);for(const t of tokens){if(numMap[t]!=null)return numMap[t];}return null;}
+
+/* ---- quiz logic ---- */
+function randDigit(){return Math.floor(Math.random()*9)+1;}
+async function newQuestion(){if(recording)await stopRec();a=randDigit();b=randDigit();correctAns=a*b;qEl.textContent=`${a} × ${b} = ?`;feedback.textContent='';input.value='';transcriptEl.textContent='';liveTranscript='';await startRec();}
+function updateScore(){scoreEl.textContent=`Score: ${correct} / ${total}`;}
+async function showResult(ok,answer){feedback.textContent=ok?'✔ Correct! Great job!':`✖ Oops! The correct answer is ${correctAns}.`;feedback.style.color=ok?'var(--correct)':'var(--wrong)';updateScore();await logAttempt(answer,ok);if(recording)await stopRec();setTimeout(newQuestion,1200);}
+
+form.addEventListener('submit',e=>{e.preventDefault();const ans=parseInt(input.value,10);if(isNaN(ans))return;total++;const ok=ans===correctAns;if(ok)correct++;showResult(ok,ans);});
+
+micBtn.addEventListener('click',async()=>{if(!recording)return;const blob=await stopRec();let said=liveTranscript;if(!said&&blob&&blob.size>1000){const js=await sttWhisper(blob);if(js.error){alert('STT Error: '+js.error);await startRec();return;}said=js.text.trim();}transcriptEl.textContent=said?`You said: "${said}"`:'';const num=extractNumber(said||'');if(num==null){alert('Could not recognize a number');await startRec();return;}input.value=num;form.requestSubmit();});
+
+newQuestion();updateScore();
+</script>
+</body>
+</html>

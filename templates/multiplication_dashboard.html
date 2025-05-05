@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multiplication Stats</title>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    :root{--bg:#f5f7fa;--card:#fff;--accent:#3498db;--text:#2c3e50}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:'Raleway',sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:2rem}
+    h1{margin:0 0 1rem;font-size:1.6rem}
+    table{border-collapse:collapse;width:100%;max-width:600px;background:var(--card);box-shadow:0 4px 14px rgba(0,0,0,.1)}
+    th,td{padding:.6rem 1rem;text-align:center;border-bottom:1px solid #e0e0e0}
+    th{background:var(--accent);color:#fff;font-weight:600}
+    tr:nth-child(even) td{background:#fafafa}
+    .back-btn{margin-top:1.5rem;background:var(--accent);color:#fff;border:none;padding:.6rem 1.2rem;border-radius:6px;font-size:1rem;cursor:pointer;text-decoration:none}
+    .back-btn:hover{background:#2a7dbf}
+  </style>
+</head>
+<body>
+  <a href="/multiplication_dashboard" title="View Stats" style="position:absolute;top:18px;left:18px;font-size:1.8rem;color:var(--accent)"><i class="fas fa-chart-bar"></i></a>
+    <h1><i class="fas fa-chart-bar"></i> Multiplication Performance</h1>
+  <table id="stat-table">
+    <thead>
+      <tr><th>Expression</th><th>Attempts</th><th>Correct</th><th>Accuracy %</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <a href="/multiplication" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Practice</a>
+
+<script>
+async function loadStats(){
+  try{
+    const res=await fetch('/api/multiplication_stats');
+    const js=await res.json();
+    const tbody=document.querySelector('#stat-table tbody');
+    tbody.innerHTML='';
+    js.stats.sort((a,b)=>a.expression.localeCompare(b.expression));
+    js.stats.forEach(s=>{
+      const tr=document.createElement('tr');
+      const acc=s.attempts?((s.correct/s.attempts*100).toFixed(1)+'%'):'-';
+      tr.innerHTML=`<td>${s.expression}</td><td>${s.attempts}</td><td>${s.correct}</td><td>${acc}</td>`;
+      tbody.appendChild(tr);
+    });
+  }catch(e){alert('Failed to load stats');console.error(e);}
+}
+loadStats();
+</script>
+</body>
+</html>

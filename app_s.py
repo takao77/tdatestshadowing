@@ -2183,6 +2183,86 @@ def test_recorder():
     return render_template("test_recorder.html")
 
 
+@app.route('/multiplication')
+def multiplication():
+    return render_template('multiplication.html')
+
+
+@app.route('/api/multiplication_log', methods=['POST'])
+def multiplication_log():
+    data = request.get_json(force=True) or {}
+    expr    = data.get('expression', '').strip()
+    answer  = data.get('answer')
+    correct = bool(data.get('correct'))
+    uid     = session.get('user_id')          # 未ログインなら None
+
+    if not expr or answer is None:
+        return jsonify({'error': 'bad request'}), 400
+
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            INSERT INTO dbo.multip_logs (user_id, expression, answer, is_correct)
+            VALUES (?, ?, ?, ?)
+        """, uid, expr, int(answer), 1 if correct else 0)
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({'ok': True})
+    except Exception as e:
+        app.logger.exception('multiplication_log insert failed: %s', e)
+        return jsonify({'error': 'db error'}), 500
+
+
+@app.route('/multiplication_dashboard')
+def multiplication_dashboard():
+    return render_template('multiplication_dashboard.html')
+
+
+@app.route('/api/multiplication_stats')
+def multiplication_stats():
+    """
+    Return aggregated stats for the multiplication app.
+    Response JSON structure:
+      {
+        "stats": [
+          {"expression": "3*4", "attempts": 5, "correct": 4},
+          ...
+        ]
+      }
+    """
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                expression,
+                COUNT(*)                                   AS attempts,
+                SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct
+            FROM dbo.multip_logs
+            GROUP BY expression
+        """)
+
+        rows = [
+            {
+                "expression": r.expression,
+                "attempts":   int(r.attempts),
+                "correct":    int(r.correct)
+            }
+            for r in cur
+        ]
+        return jsonify({"stats": rows})
+
+    except Exception as e:
+        app.logger.exception("multiplication_stats failed: %s", e)
+        return jsonify({"error": "db error"}), 500
+
+    finally:
+        if cur:  cur.close()
+        if conn: conn.close()
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

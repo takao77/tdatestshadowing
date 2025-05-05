@@ -2263,6 +2263,27 @@ def multiplication_stats():
         if conn: conn.close()
 
 
+@app.route('/api/get_multip_question')
+def get_multip_question():
+    base = request.args.get('base', type=int, default=0)  # 0 = random
+    if base and (base < 2 or base > 9):
+        return jsonify({'error': 'invalid base'}), 400
+
+    import random
+    if base:
+        a = base
+        b = random.randint(2, 9)
+    else:
+        a = random.randint(2, 9)
+        b = random.randint(2, 9)
+
+    # a と b をランダムに入れ替えても OK
+    if random.random() < 0.5:
+        a, b = b, a
+
+    return jsonify({'a': a, 'b': b})
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

@@ -601,6 +601,50 @@ def translate_en_to_jp(text: str) -> str:
         return ""
 
 
+def translate_word_to_jp(word: str) -> str:
+    """
+    単語１語を “日本語３〜５語程度＋頭文字” で返す。
+    OpenAI から適切に取れなかった場合は英単語をそのまま返す。
+    """
+    prompt = (
+        f'次の英単語を日本語に翻訳して。およそ３〜５語で。'
+        f'さらに、この英単語の最初のアルファベットを書いてください。\n'
+        f'Word: "{word}"'
+    )
+
+    url = (
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"
+        f"{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15"
+    )
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a bilingual assistant. "
+                                          "Output ONLY the Japanese translation."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 30,
+        "temperature": 0.3
+    }
+
+    try:
+        res = requests.post(url, headers=HEADERS, json=payload, timeout=15)
+        res.raise_for_status()
+
+        jp = (res.json()
+                  .get("choices", [{}])[0]
+                  .get("message", {})
+                  .get("content", "")
+                  .strip())
+
+        if not jp:
+            raise ValueError("No content in choices")
+
+        return jp.split('\n')[0]        # 複数行返る場合は先頭行だけ
+    except Exception as e:
+        app.logger.warning("translate_word_to_jp failed: %s", e)
+        return word                     # フォールバック
+
+
 # Azure OpenAI 定数は既存のものを再利用
 CHAT_URL = (
     f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"

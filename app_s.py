@@ -24,6 +24,8 @@ import secrets
 import tempfile
 import subprocess, tempfile, os, json, shlex
 from collections import namedtuple
+# ファイル冒頭でまとめて
+import uuid, re, json, time, random
 
 
 # Load environment variables from .env file
@@ -165,6 +167,14 @@ stt_client = AzureOpenAI(
 )
 
 STT_DEPLOY = os.getenv("AZURE_OPENAI_STT_DEPLOY", "stt_model")  # 例: whisper-1 の独自名
+
+# --------------------- ③ o4-mini 用（STT と同じリソース） ------------------
+o4_client = AzureOpenAI(
+    azure_endpoint = os.getenv("AZURE_OPENAI_STT_ENDPOINT"),  # 例: https://xxx.cognitiveservices.azure.com/
+    api_key        = os.getenv("AZURE_OPENAI_STT_KEY"),
+    api_version    = "2024-12-01-preview"
+)
+O4_DEPLOY = "o4-mini"          # デプロイ名
 
 def get_db_connection():
     """
@@ -2326,6 +2336,180 @@ def get_multip_question():
         a, b = b, a
 
     return jsonify({'a': a, 'b': b})
+
+
+# ───────────────────────────
+#  Vocabulary Size Quick-Test
+# ───────────────────────────
+# --------------------------------------------
+# 50 語語彙テスト初期化  ― シンプル版
+# --------------------------------------------
+import uuid, random, json
+# ----------------- ② サーバ側バックアップ語列（実在語 40） -------
+BACKUP_REAL = [
+    "angle","bicycle","cabinet","diminish","fragile","horizon","imitate",
+    "jovial","kernel","linger","mundane","nebulous","opaque","parity",
+    "quiver","raucous","salient","tenuous","unfurl","verbose","wistful",
+    "xenophobia","yearling","zealous","abrogate","bellicose","cabal",
+    "diaphanous","enervate","fractious","galvanize","hauteur",
+    "impecunious","jejune","lachrymose","mendacity","nonplussed",
+    "obdurate","perspicacious","quotidian","respite","sagacious"
+][:40]                                   # 念のため 40 語に切り詰め
+
+# ----------------- ③ GPT に 10 語生成させるヘルパ ---------------
+def gpt_ten_words() -> list[dict]:
+    """4o-mini で REAL 5 + FAKE 5 を生成して list[dict] を返す"""
+    prompt = (
+        "Return exactly 10 items as ONE JSON array. "
+        "First 5 are REAL English lemmas (\"fake\":false). "
+        "Next 5 are plausible pseudo-words (\"fake\":true). "
+        'Format: [{"word":"angle","fake":false}, … ]'
+    )
+    rsp = client.chat.completions.create(
+        model   = DEPLOY_CHAT,
+        messages=[{"role":"user","content":prompt}],
+        max_completion_tokens = 4000,
+        response_format       = {"type":"json_object"}
+    )
+    obj = json.loads(rsp.choices[0].message.content)
+    items = obj["words"] if isinstance(obj,dict) else obj
+    # フィルタリング：単語だけを確実に抜き重複除去
+    out, seen = [], set()
+    for it in items:
+        w   = str(it.get("word","")).strip()
+        f   = bool(it.get("fake",False))
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            out.append({"word":w,"fake":f})
+        if len(out) == 10:
+            break
+    return out
+
+# ----------------- ④ Flask ルート -------------------------------
+@app.route("/api/vsize/start")
+def vsize_start():
+    if "user_id" not in session:
+        return jsonify({"error":"login"}),403
+
+    # 1) GPT で 10 語取得（最大 3 回リトライ）
+    gpt_items, tries = [], 0
+    while len(gpt_items) < 10 and tries < 3:
+        gpt_items = gpt_ten_words()
+        tries += 1
+        time.sleep(0.5)
+
+    if len(gpt_items) < 10:
+        return jsonify({"error":"gpt failed"}),502
+
+    # 2) バックアップ 40 語と結合して 50 語リストを作成
+    words = (
+        [{"id":i+1, "word":w, "fake":False}
+         for i,w in enumerate(BACKUP_REAL)] +
+        [{"id":i+41, "word":it["word"], "fake":it["fake"]}
+         for i,it in enumerate(gpt_items)]
+    )
+    random.shuffle(words)
+
+    # 3) セッション保存
+    tid = str(uuid.uuid4())
+    session["vsize_test"] = {"id":tid, "words":words}
+
+    # 4) クライアント返送（fake フラグは隠す）
+    public = [{"id":w["id"], "word":w["word"]} for w in words]
+    return jsonify({"test_id":tid,"items":public})
+
+# ---------------------------------------------------------
+# 採点エンドポイント  /api/vsize/submit
+# ---------------------------------------------------------
+REAL_TOTAL  = 40          # vsize_start で固定
+FAKE_TOTAL  = 10
+TARGET_REAL_RATIO = 48000 # (= 本テストで 100 % 正答した場合の推定レマ数)
+
+@app.route("/api/vsize/submit", methods=["POST"])
+def vsize_submit():
+    j = request.get_json(force=True) or {}
+    test = session.get("vsize_test")
+
+    # ① セッション検証
+    if not test or test["id"] != j.get("test_id"):
+        return jsonify({"error": "session expired"}), 400
+
+    chosen = set(int(i) for i in j.get("known_ids", []))
+
+    # ② real / fake を分類
+    real = [w for w in test["words"] if not w["fake"]]
+    fake = [w for w in test["words"] if w["fake"]]
+
+    real_known = sum(1 for w in real if w["id"] in chosen)
+    fake_hit   = sum(1 for w in fake if w["id"] in chosen)
+
+    # ③ 補正 (擬似語誤認を差し引き、下限 0)
+    net = max(real_known - fake_hit, 0)
+
+    pct = net / REAL_TOTAL                   # 実在語正答率 (0.0–1.0)
+
+    est_lemmas   = int(round(pct * TARGET_REAL_RATIO, -2))   # 100 語単位
+    est_families = int(round(est_lemmas / 2.2, -1))          # 10 語単位
+
+    return jsonify({
+        "net":          net,
+        "pct":          round(pct * 100, 1),
+        "fake_hit":     fake_hit,
+        "est_lemmas":   est_lemmas,
+        "est_families": est_families
+    })
+
+
+@app.route("/api/vsize/report", methods=["POST"])
+def vsize_report():
+    """
+    受信例:
+      {"net":14,"pct":35.0,"est_lemmas":17000,"est_families":8000,"fake_hit":1}
+    戻り値:
+      {"report":"<日本語レポート全文>"}
+    """
+    data = request.get_json(force=True) or {}
+
+    sys_prompt = (
+        "あなたは英語教育の専門家です。日本語母語話者の学習者に向けて、"
+        "語彙診断の結果を踏まえた詳細な学習アドバイスを作成してください。"
+    )
+
+    user_prompt = f"""
+【必須セクション】
+1. 評価表（項目 / あなたの結果 / 一般的な日本人EFL学習者の目安 / コメント）
+2. 推定語彙量、推定TOEICレベル、推定英検レベル、推定CEFRレベル
+3. 強みと改善点
+4. 結論
+
+【条件】
+- 得点や語彙量が低い場合は初級〜中級向け、高い場合は上級向けとコメントを変えること
+- レマ、CEFRなど一般人にはなじみのない概念ついて、簡単に解説してください
+- プレーンテキストで出力（Markdown・HTML禁止）
+- 下記 JSON を参照して数値を反映すること
+
+### 診断結果 JSON
+{json.dumps(data, ensure_ascii=False)}
+"""
+
+    rsp = o4_client.chat.completions.create(
+        model = O4_DEPLOY,                 # "o4-mini"
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user",   "content": user_prompt}
+        ],
+        max_completion_tokens = 4000        # o4-mini は *completion* のみ許可
+    )
+
+    report_text = (rsp.choices[0].message.content or "").strip()
+    return jsonify({"report": report_text})
+
+
+@app.route('/vocab_test')
+def vocab_test_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('vocab_test.html')
 
 
 if __name__ == '__main__':

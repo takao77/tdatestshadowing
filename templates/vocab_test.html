@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>語彙サイズ診断</title>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    :root{--bg:#282828;--card:#333;--blue:#3498db;--blue-light:#5dade2;--text:#fff}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:'Raleway',sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:40px 0}
+    h1{font-weight:600;margin-bottom:1.2rem;text-align:center;font-size:1.6rem}
+    #list{max-width:620px;width:90%;margin:0 auto}
+    .item{display:flex;align-items:center;gap:1rem;margin:.45rem 0;padding:.4rem .8rem;border-radius:8px;background:var(--card);cursor:pointer;transition:background .2s}
+    .item.checked{background:var(--blue)}
+    .item span{flex:1}
+    .item i{opacity:.35}
+    #submit{margin-top:1.6rem;padding:12px 38px;font-size:1rem;border:none;border-radius:50px;background:var(--blue);color:#fff;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .3s}
+    #submit.show{opacity:1;pointer-events:auto}
+    #report{margin-top:2rem;width:90%;max-width:880px;line-height:1.55}
+    #report pre{white-space:pre-wrap;font-family:inherit;font-size:.95rem;background:#222;padding:1rem;border-radius:8px}
+    .loading{margin-top:1.2rem;font-size:1rem;opacity:.8}
+  </style>
+</head>
+<body>
+  <h1>Vocabulary Size Quick‑Check</h1>
+  <div id="list"></div>
+  <button id="submit">送信</button>
+  <div id="loading" class="loading" style="display:none"><i class="fas fa-spinner fa-spin"></i> レポート生成中…</div>
+  <div id="report"></div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    let testID='';
+    const selected=new Set();
+
+    function init(){
+      $.getJSON('/api/vsize/start',d=>{
+        testID=d.test_id;
+        const list=$('#list').empty();
+        d.items.forEach(({id,word})=>{
+          const row=$('<div>',{class:'item','data-id':id})
+            .append($('<span>').text(word))
+            .append($('<i class="fas fa-check-circle"></i>'));
+          row.on('click',function(){
+            const pid=$(this).data('id');
+            if(selected.has(pid)){selected.delete(pid);$(this).removeClass('checked');}
+            else {selected.add(pid);$(this).addClass('checked');}
+            $('#submit').toggleClass('show',selected.size>0);
+          });
+          list.append(row);
+        });
+      }).fail(()=>alert('語彙リストの取得に失敗しました'));
+    }
+
+    $('#submit').on('click',()=>{
+      $('#submit').hide();
+      $('#loading').show();
+      $.ajax({url:'/api/vsize/submit',method:'POST',contentType:'application/json',data:JSON.stringify({test_id:testID,known_ids:[...selected]})})
+        .done(r=>{
+          // 次に GPT で日本語レポート生成
+          $.ajax({url:'/api/vsize/report',method:'POST',contentType:'application/json',data:JSON.stringify(r)})
+            .done(rep=>{
+              $('#loading').hide();
+              $('#report').html('<pre>'+$('<div>').text(rep.report).html()+'</pre>');
+              $('#list').hide();
+            })
+            .fail(()=>{$('#loading').hide();alert('レポート生成に失敗しました')});
+        })
+        .fail(()=>{$('#loading').hide();alert('採点に失敗しました')});
+    });
+
+    $(init);
+  </script>
+</body>
+</html>

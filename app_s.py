@@ -747,46 +747,54 @@ def make_cloze(sentence: str, lemma: str) -> tuple[str,str]:
 
 @app.route('/login', methods=['GET', 'POST'])
 def login_user():
-    if request.method == 'POST':
-        user_id_input = request.form.get('user_id')
-        password_input = request.form.get('password')
+    # --------------- GET: 画面表示 -----------------
+    if request.method == 'GET':
+        return render_template('login.html')
 
-        conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("""
-            SELECT id, password_hash, name, is_email_verified
-              FROM dbo.users
-             WHERE user_id = ?
-        """, user_id_input)
-        row = cur.fetchone(); cur.close(); conn.close()
+    user_id_input  = request.form.get('user_id', '').strip()
+    password_input = request.form.get('password')
 
-        if not row:
-            return render_template('login.html', message='ユーザーが存在しません')
+    # --------------- ① 認証チェック -----------------
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT id, password_hash, name, is_email_verified
+          FROM dbo.users
+         WHERE user_id = ?
+    """, user_id_input)
+    row = cur.fetchone()
+    cur.close(); conn.close()      # ← ★ ここで **必ず**閉じてしまう
 
-        db_id, db_pw_hash, db_name, verified = row
-        if not verified:
-            return render_template('login.html', message='メール認証を完了してください')
+    if not row:
+        return render_template('login.html', message='ユーザーが存在しません')
 
-        if not check_password(password_input, db_pw_hash):
-            return render_template('login.html', message='パスワードが違います')
+    db_id, db_pw_hash, db_name, verified = row
+    if not verified:
+        return render_template('login.html', message='メール認証を完了してください')
 
-        # ── ★ ④ ログイン成功 ⇒ verify_token を NULL にする ──
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-                UPDATE dbo.users
-                   SET verify_token = NULL
-                 WHERE id = ?
-                   AND verify_token IS NOT NULL      -- 既に NULL ならスキップ
-            """, db_id)
-        conn.commit()
-        cur.close();
-        conn.close()
+    if not check_password(password_input, db_pw_hash):
+        return render_template('login.html', message='パスワードが違います')
 
-        session['user_id'] = db_id
-        session['user_name'] = db_name
+    # --------------- ② セッション保存 ---------------
+    session['user_id']   = db_id
+    session['user_name'] = db_name
+
+    # --------------- ③ パーソナルコース存在確認 -----
+    conn = get_db_connection()     # ★ 新しい接続を取得
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT 1
+          FROM dbo.courses
+         WHERE owner_user_id = ? AND category_id = 4
+    """, db_id)
+    has_personal = cur.fetchone() is not None
+    cur.close(); conn.close()      # 使い切ったら必ずクローズ
+
+    # --------------- ④ リダイレクト ----------------
+    if has_personal:
         return redirect(url_for('home'))
-
-    return render_template('login.html')
+    else:
+        return redirect(url_for('level_select'))
 
 
 @app.route('/home')
@@ -2074,12 +2082,79 @@ def ai_session_start():
     return jsonify({'words':rows,'user_level':level})
 
 
+# ① 英語っぽいトークンに単純マッチ（A-Z だけで出来ている語を英語とみなす）
+ENG_WORD = re.compile(r'[A-Za-z]{2,}')
+
+def text_to_ssml(text: str,
+                 jp_voice="ja-JP-NanamiNeural",
+                 en_voice="en-US-AriaNeural",
+                 jp_style="cheerful",
+                 en_style="chat") -> str:
+    """
+    文章中の「英単語／英文らしき部分」を自動判定し、
+    日本語は jp_voice、英語は en_voice で読み上げる SSML を返す。
+    """
+    # ① 英語らしいブロックを抽出  ─ 連続する ASCII 文字列
+    tokens = re.split(r'([A-Za-z0-9 ,.;:!?\'"()-]+)', text)
+
+    ssml_parts = []
+    for tok in tokens:
+        if not tok:
+            continue
+        # “英語ブロック” とみなす簡易判定（ASCII 率 80% 以上）
+        ascii_ratio = sum(1 for c in tok if ord(c) < 128) / len(tok)
+        is_en = ascii_ratio > 0.8
+
+        if is_en:
+            ssml_parts.append(
+                f'<voice name="{en_voice}">'
+                f'  <mstts:express-as style="{en_style}">{tok}</mstts:express-as>'
+                f'</voice>')
+        else:
+            ssml_parts.append(
+                f'<voice name="{jp_voice}">'
+                f'  <mstts:express-as style="{jp_style}">{tok}</mstts:express-as>'
+                f'</voice>')
+
+    return '''
+<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+       xmlns:mstts="http://www.w3.org/2001/mstts"
+       xml:lang="ja-JP">
+  {}
+</speak>'''.format('\n  '.join(ssml_parts)).strip()
+
+
+def tts_ssml(access_token: str, ssml: str) -> bytes:
+    """
+    SSML をそのまま Azure TTS に投げる超シンプル版。
+    voice/style を含む SSML を自前で組み立ててから渡す時専用。
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type":  "application/ssml+xml; charset=utf-8",
+        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3"
+    }
+    url = os.getenv("AZURE_TTS_API_URL")
+    r = requests.post(url, headers=headers, data=ssml.encode("utf-8"))
+    r.raise_for_status()
+    return r.content
+
+
 @app.route('/api/sakura', methods=['POST'])
 def sakura_teacher():
-    data      = request.get_json(force=True)
-    word      = data.get('word','').strip()
-    sentence  = data.get('sentence','').strip()
+    """
+    さくら先生:
+      1. 単語をやさしく解説
+      2. 例文の意味
+      3. Collocations
+      4. 励ましメッセージ
+    日本語は Nanami (ja-JP)、英語は Aria (en-US) で読み上げる。
+    """
+    data = request.get_json(force=True)
+    word = data.get('word', '').strip()
+    sentence = data.get('sentence', '').strip()
 
+    # ---------- ① GPT で日本語説明を生成 ----------
     prompt = f"""
 あなたは『さくら先生』というやさしい日本語教師です。
 Word: 「{word}」
@@ -2087,29 +2162,31 @@ Sentence: 「{sentence}」
 
 1. 単語を小学生にも分かるように簡単に解説
 2. 例文の意味を解説
-3. 単語について頻繁に使われるCollocationsコロケーションをいくつか紹介
+3. 単語について頻繁に使われる Collocations コロケーションをいくつか紹介
 4. 最後に相手を励ます短いメッセージ
 口調は親しみやすく、語尾に♡などは使わず自然体で。
 """
-
     gpt = chat_client.chat.completions.create(
         model=CHAT_DEPLOY,
-        messages=[{"role":"system","content":prompt}],
-        temperature=0.7
+        messages=[{"role": "system", "content": prompt}],
+        temperature=0.7,
     )
     jp_text = gpt.choices[0].message.content.strip()
 
-    # ——— TTS  (ja-JP-NanamiNeural + cheerful) ———
-    access = get_access_token()
-    audio  = generate_speech(
-        text = jp_text,
-        access_token = access,
-        language_code="ja-JP",
-        voice_name="ja-JP-NanamiNeural",
-        style="cheerful"          # gentle & 明るい
-    )
-    b64 = base64.b64encode(audio).decode('utf-8')
-    return jsonify({'text': jp_text, 'audio': b64})
+    # ---------- ② 日本語＋英語混在 SSML を生成 ----------
+    ssml = text_to_ssml(jp_text)
+
+    # ---------- ③ Azure Neural TTS で音声化 ----------
+    try:
+        access = get_access_token()
+        audio_bin = tts_ssml(access, ssml)
+        audio_b64 = base64.b64encode(audio_bin).decode('utf-8')
+    except Exception as e:
+        app.logger.exception("TTS failed: %s", e)
+        # 音声が生成できなくてもテキストだけは返す
+        audio_b64 = ""
+
+    return jsonify({'text': jp_text, 'audio': audio_b64})
 
 
 @app.route('/api/review/next')
@@ -2510,6 +2587,145 @@ def vocab_test_page():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))
     return render_template('vocab_test.html')
+
+
+# ───────────── A) post-login 判定 ─────────────
+@app.route('/post_login_redirect')
+def post_login_redirect():
+    """
+    ログイン成功後に呼び出す。
+    owner_user_id == 自分 かつ category_id == 4 のコース
+    （= パーソナル辞書）が存在すれば /home、
+    無ければレベル選択へ。
+    """
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+
+    uid = session['user_id']
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT 1
+          FROM dbo.courses
+         WHERE owner_user_id = ? AND category_id = 4
+    """, uid)
+    has_personal = bool(cur.fetchone())
+    cur.close(); conn.close()
+
+    return redirect(url_for('home' if has_personal else 'level_select'))
+
+
+# ----------------  レベル → コース名 マッピング  ----------------
+COURSE_MAP = {
+    'L1': 'L1_Starter',
+    'L2': 'L2_Basic',
+    'L3': 'L3_UpperIntermediate',
+    'L4': 'L4_Advanced',
+    'L5': 'L5_Expert',
+    'L6': 'L6_Master'
+}
+
+# --------------------------------------------------------------
+#  レベル選択画面 ── 10 語取得エンドポイント
+#    例: /api/level_words?level=L3
+# --------------------------------------------------------------
+@app.route('/api/level_words')
+def api_level_words():
+    """
+    ▸ パラメータ:  level=L1〜L6
+    ▸ 処理:
+        1. level を COURSE_MAP でコース名へ変換
+        2. そのコースに登録されている単語を取得（10 語想定）
+        3. { items:[{id,word,sentence}, …] } を返す
+    """
+    # ① 認証
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+
+    # ② level → コース名解決
+    level = request.args.get('level', '').upper()
+    course_name = COURSE_MAP.get(level)
+    if not course_name:
+        return jsonify({'error': 'level'}), 400
+
+    # ③ DB から語彙取得
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT id, word, sentence
+          FROM dbo.vocab_items
+         WHERE course = ?
+         ORDER BY id
+    """, course_name)
+    items = [dict(id=r.id, word=r.word, sentence=r.sentence) for r in cur]
+    cur.close(); conn.close()
+
+    # ④ 検証（10 語なければエラー）
+    if len(items) != 10:
+        return jsonify({'error': f'course "{course_name}" must contain 10 items'}), 500
+
+    return jsonify({'items': items})
+
+
+def ensure_personal_course(uid:int)->tuple[int,str]:
+    """
+    personal コースを探し、なければ作成して
+    (course_id, course_name) を返す
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name
+          FROM dbo.courses
+         WHERE owner_user_id=? AND category_id=4
+    """, uid)
+    row = cur.fetchone()
+
+    if row:                         # 既存
+        cid, cname = row.id, row.name
+    else:                           # 新規作成
+        cname = f"{session['user_name']}_personal"   # ←ご要望どおり
+        cur.execute("""
+            INSERT INTO dbo.courses
+                   (name, language, is_public, owner_user_id, category_id, overview)
+            OUTPUT INSERTED.id
+            VALUES (?, 'en', 0, ?, 4, N'あなただけのパーソナライズ辞書')
+        """, cname, uid)
+        cid = cur.fetchone()[0]
+        conn.commit()
+
+    cur.close(); conn.close()
+    return cid, cname
+
+
+@app.route('/api/level_confirm', methods=['POST'])
+def api_level_confirm():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+
+    data  = request.get_json(force=True) or {}
+    items = data.get('items', [])
+    if len(items) != 10:
+        return jsonify({'error': 'need 10 items'}), 400
+
+    uid = session['user_id']
+    course_id, course_name = ensure_personal_course(uid)
+
+    conn = get_db_connection(); cur = conn.cursor()
+    for it in items:
+        cur.execute("""
+            INSERT INTO dbo.vocab_items (course_id, course, sentence, word)
+            VALUES (?, ?, ?, ?)
+        """, course_id, course_name, it['sentence'], it['word'])
+    conn.commit()
+    cur.close(); conn.close()
+
+    return jsonify({'ok': True})
+
+
+@app.route('/level_select')
+def level_select():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('level_select.html')
 
 
 if __name__ == '__main__':

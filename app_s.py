@@ -803,8 +803,11 @@ def home():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))  # Redirect to login if not authenticated
 
-    # Render the home.html page for course selection
-    return render_template('home.html', user_name=session.get('user_name'))
+    return render_template(
+        'home.html',
+        user_name=session.get('user_name'),
+        user_id=session.get('user_id')      # ★ 追加
+    )
 
 
 @app.route('/logout')
@@ -2726,6 +2729,98 @@ def level_select():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))
     return render_template('level_select.html')
+
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'GET':
+        return render_template('forgot_pw.html')
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        return render_template('forgot_pw.html', msg='メールを入力してください')
+
+    conn, cur = get_db_connection(), None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM dbo.users WHERE email = ?", email)
+        row = cur.fetchone()
+        if not row:
+            return render_template('forgot_pw.html', msg='登録されていません')
+
+        uid, name = row.id, row.name
+        token = secrets.token_urlsafe(32)
+        expiry = datetime.utcnow() + timedelta(minutes=30)
+
+        cur.execute("""
+            UPDATE dbo.users
+               SET reset_token = ?, reset_expiry = ?
+             WHERE id = ?
+        """, token, expiry, uid)
+        conn.commit()
+    finally:
+        if cur: cur.close()
+        conn.close()
+
+    # ── メール送信 ──────────────────────────────
+    reset_link = f"{VERIFY_BASE_URL.replace('verify_email','reset_password')}?token={token}"
+    body = f"""{name} さん
+
+以下のリンクをクリックして新しいパスワードを設定してください。
+30 分以内に完了しないと無効になります。
+
+{reset_link}
+
+Polyagent AI"""
+    mail.send(Message(
+        subject='[Polyagent AI] パスワード リセット',
+        recipients=[email],
+        body=body
+    ))
+    return render_template('forgot_pw_done.html')
+
+# ──────────────────────────────────────────────
+# ② リセットリンク → 新パスワード入力
+# ──────────────────────────────────────────────
+@app.route('/reset_password', methods=['GET', 'POST'])
+def reset_password():
+    token = request.args.get('token','').strip() if request.method == 'GET' else request.form.get('token','')
+    if not token:
+        return render_template('reset_pw_result.html', success=False, msg='リンクが無効です')
+
+    conn, cur = get_db_connection(), None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, reset_expiry FROM dbo.users
+             WHERE reset_token = ?
+        """, token)
+        row = cur.fetchone()
+        if not row or row.reset_expiry < datetime.utcnow():
+            return render_template('reset_pw_result.html', success=False, msg='リンクが無効または期限切れです')
+
+        uid = row.id
+
+        # GET → フォーム表示
+        if request.method == 'GET':
+            return render_template('reset_pw.html', token=token)
+
+        # POST → パスワード更新
+        pw1 = request.form.get('password','')
+        pw2 = request.form.get('password2','')
+        if len(pw1) < 6 or pw1 != pw2:
+            return render_template('reset_pw.html', token=token, msg='確認用が一致しません')
+
+        cur.execute("""
+            UPDATE dbo.users
+               SET password_hash = ?, reset_token = NULL, reset_expiry = NULL
+             WHERE id = ?
+        """, hash_password(pw1), uid)
+        conn.commit()
+        return render_template('reset_pw_result.html', success=True, msg='パスワードを更新しました')
+    finally:
+        if cur: cur.close()
+        conn.close()
 
 
 if __name__ == '__main__':

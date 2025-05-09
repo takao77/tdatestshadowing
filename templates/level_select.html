@@ -1,0 +1,173 @@
+<!-- templates/level_select.html -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>レベル選択 – パーソナライズ辞書セットアップ</title>
+
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- FontAwesome（アイコン用） -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+        crossorigin="anonymous" referrerpolicy="no-referrer"/>
+
+  <style>
+    :root{
+      --bg:#282828;
+      --card:#333;
+      --card-border:#444;
+      --blue:#3498db;
+      --blue-light:#5dade2;
+      --text:#fff;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;padding:0;
+      font-family:'Raleway',sans-serif;
+      background:var(--bg);
+      color:var(--text);
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    }
+    h1{margin:2rem 0 .5rem;font-weight:600;text-align:center;font-size:1.7rem}
+    .level-btns{
+      display:flex;flex-wrap:wrap;gap:.75rem;justify-content:center;margin-bottom:2rem
+    }
+    .level-btn{
+      padding:.6rem 1.2rem;border:none;border-radius:32px;cursor:pointer;
+      background:#444;color:#ddd;font-size:.95rem;font-weight:600;
+      transition:background .2s,color .2s,transform .15s
+    }
+    .level-btn:hover{background:var(--blue-light);color:#fff}
+    .level-btn.active{background:var(--blue);color:#fff;transform:translateY(-2px)}
+    .grid{
+      width:90%;max-width:800px;display:grid;gap:1.2rem;
+      grid-template-columns:repeat(auto-fill,minmax(240px,1fr));margin-bottom:2rem
+    }
+    .card{
+      background:var(--card);border:1px solid var(--card-border);
+      border-radius:10px;padding:1rem .9rem;min-height:110px;
+      display:flex;flex-direction:column;justify-content:center;
+      box-shadow:0 3px 10px rgba(0,0,0,.25);
+      transition:transform .2s
+    }
+    .card:hover{transform:translateY(-3px)}
+    .card h3{margin:0 0 .3rem;font-size:1.2rem;text-align:center}
+    .card p{margin:0;font-size:.85rem;line-height:1.35;text-align:center;opacity:.8}
+    .actions{margin-bottom:3rem;text-align:center}
+    .main{
+      padding:.75rem 2.5rem;border:none;border-radius:32px;font-size:1rem;
+      cursor:pointer;font-weight:600
+    }
+    .confirm{background:var(--blue);color:#fff}
+    .confirm:disabled{background:#555;cursor:default;opacity:.6}
+    .msg{margin-top:.5rem;font-size:.9rem;color:#aaa}
+  </style>
+</head>
+<body>
+
+  <h1>あなたのレベルを選んでください</h1>
+
+  <!-- A) レベル選択ボタン -->
+  <div class="level-btns" id="level-buttons">
+    <!-- 6 段階 -->
+    <button class="level-btn" data-level="L1">L1 Starter</button>
+    <button class="level-btn" data-level="L2">L2 Beginner</button>
+    <button class="level-btn" data-level="L3">L3 Intermediate</button>
+    <button class="level-btn" data-level="L4">L4 Upper-Int</button>
+    <button class="level-btn" data-level="L5">L5 Advanced</button>
+    <button class="level-btn" data-level="L6">L6 Pro</button>
+  </div>
+
+  <!-- B) 10 語カード -->
+  <div class="grid" id="word-grid" style="display:none"></div>
+
+  <!-- C) 確定ボタン -->
+  <div class="actions">
+    <button id="btn-confirm" class="main confirm" disabled>この10語でスタート</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <script>
+    const grid       = document.getElementById('word-grid');
+    const confirmBtn = document.getElementById('btn-confirm');
+    const msg        = document.getElementById('msg');
+    let   poolItems  = [];      // サーバから受け取った10語
+    let   chosenLvl  = '';
+
+    // -------- ① レベルボタンクリック ----------
+    document.querySelectorAll('.level-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const lvl = btn.dataset.level;
+        if(lvl === chosenLvl) return;
+        chosenLvl = lvl;
+
+        document.querySelectorAll('.level-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+
+        loadLevel(lvl);
+      });
+    });
+
+    // -------- ② /api/level_words 呼び出し ----------
+    function loadLevel(level){
+      msg.textContent = '読み込み中…';
+      confirmBtn.disabled = true;
+      grid.style.display = 'none';
+      grid.innerHTML = '';
+
+      fetch(`/api/level_words?level=${level}`)
+        .then(r=>r.json())
+        .then(j=>{
+          poolItems = j.items || [];
+          renderCards(poolItems);
+          confirmBtn.disabled = false;
+          msg.textContent = '';
+        })
+        .catch(err=>{
+          console.error(err);
+          msg.textContent = '読み込みに失敗しました';
+        });
+    }
+
+    // -------- ③ カード描画 ----------
+    function renderCards(items){
+      grid.innerHTML = '';
+      items.forEach(it=>{
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<h3>${it.word}</h3><p>${it.sentence}</p>`;
+        grid.appendChild(card);
+      });
+      grid.style.display = 'grid';
+      window.scroll({top:grid.offsetTop-20,behavior:'smooth'});
+    }
+
+    // -------- ④ 確定 POST ----------
+    confirmBtn.onclick = ()=>{
+      confirmBtn.disabled = true;
+      msg.textContent = '保存中…';
+
+      fetch('/api/level_confirm',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({items:poolItems})
+      })
+      .then(r=>r.json())
+      .then(()=>{
+        location.href='/home';
+      })
+      .catch(e=>{
+        console.error(e);
+        msg.textContent = '保存エラーが起きました';
+        confirmBtn.disabled=false;
+      });
+    };
+  </script>
+</body>
+</html>

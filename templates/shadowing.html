@@ -187,6 +187,63 @@
       line-height:1.4;
       opacity:.85;
     }
+
+    /* ---------- Chat bubble layout ---------- */
+    .chat-message {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 8px 0;
+        font-size: .95rem;
+        line-height: 1.45;
+    }
+
+    .chat-message.ai {
+        flex-direction: row;
+    }
+
+    /* AI = 左寄せ   */
+    .chat-message.user {
+        flex-direction: row-reverse;
+    }
+
+    /* ユーザー = 右寄せ */
+
+    .chat-message .icon {
+        font-size: 24px;
+        flex-shrink: 0;
+    }
+
+    .chat-bubble {
+        max-width: 80%;
+        padding: 10px 14px;
+        border-radius: 14px;
+        background: #333;
+        color: #fff;
+        word-break: break-word;
+    }
+
+    /* ── ここだけ色を調整 ────────────────── */
+    .chat-message.ai .icon {
+        color: #9e9e9e;
+    }
+
+    /* AI 先生：灰色アイコン   */
+    .chat-message.ai .chat-bubble {
+        background: #444;
+    }
+
+    /* バブルも濃いグレー */
+
+    .chat-message.user .icon {
+        color: #3498db;
+    }
+
+    /* ユーザー：青             */
+    .chat-message.user .chat-bubble {
+        background: #236;
+    }
+
   </style>
 </head>
 <body>
@@ -406,6 +463,11 @@
 
     /* ★ この行を追加（ここで1回だけ判定） */
     const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+
+    const sessionState = {
+      vocabId : null,   // 現在学習中の語彙 ID
+      aiScore : null    // AI 採点（数値）※あれば
+    };
 
     /* === 1) まずグローバル関数を宣言 ========================= */
     function updateVisibility() {
@@ -951,17 +1013,24 @@
         });
 
         /* ======== ミニ util =================================== */
-        function appendChat(role, text, speaker = 'default') {
+        function appendChat(role, text) {
+            /* role: 'assistant' か 'user' を想定 ------------------ */
 
-            /* --- アイコン表 --- */
-            const icons = {
-                user: '🧑',
-                assistant: speaker === 'sakura' ? '🌸' : '🤖'   // ← ここを 🌸 に
-            };
+            // 使いたいアイコンを Font Awesome から選択
+            const iconClass = role === 'assistant'
+                    ? 'fas fa-chalkboard-user'   // 👩‍🏫 AI 先生
+                    : 'fas fa-user-circle';      // 🙂 ユーザー
+
+            const sideClass = role === 'assistant' ? 'ai' : 'user';
 
             $('#chat-window')
-                    .append(`<p><b>${icons[role]}:</b> ${text}</p>`)
-                    .scrollTop(1e6);
+                    .append(`
+              <div class="chat-message ${sideClass}">
+                <i class="icon ${iconClass}"></i>
+                <div class="chat-bubble">${text}</div>
+              </div>
+            `)
+                    .scrollTop(1e8);     // 常に最下部へスクロール
         }
 
         /* ======== Recorder helpers =========================== */
@@ -1035,21 +1104,30 @@
         /* ===== 2. AI 用に語句を取って来る関数 ===== */
         async function fetchNextAiItem() {
             try {
-                const course = "{{ course }}";                // Jinja から注入
-                const res = await fetch(`/get_shadow_sentence?course=${encodeURIComponent(course)}`);
-                const js = await res.json();
-                if (js.error) throw js.error;
+                const course = "{{ course }}";              // Jinja から注入
+                const url = `/api/get_due_vocab?course=${encodeURIComponent(course)}`;
 
-                // 受け取った語句をグローバルに反映
-                currentSentence = js.sentence;
-                currentWord = js.word;
-                currentVocabId = js.vocab_id ?? null;        // DB 用 ID があれば
+                /* 1) 期限が来ている語句のリストを取得 */
+                const res = await fetch(url);
+                const items = await res.json();
+
+                if (!Array.isArray(items) || items.length === 0) {
+                    throw 'No due items';
+                }
+
+                /* 2) 先頭 1 件を採用  ----------------------------- */
+                const it = items[0];
+                currentSentence = it.sentence;
+                currentWord = it.word;
+                currentVocabId = it.vocab_id;           // ← NULL にならない
                 $('#dynamic-sentence').text(currentSentence);
 
-            } catch (e) {
-                console.error('fetchNextAiItem error:', e);
+            } catch (err) {
+                console.error('fetchNextAiItem error:', err);
                 $('#dynamic-sentence').text('🚨 新しい語句の取得に失敗しました');
+                currentVocabId = null;          // safety
             }
+
         }
 
         /* --- 初期タブを練習モードに --- */
@@ -1192,14 +1270,20 @@
                 });
     }
 
-    function appendChat(role, text) {
-        // ① アイコンを先に決めて…
-        const icon = role === 'user' ? '🧑' : '🤖';
+    function appendChat(role, text, speaker = 'default') {
+        const iconClass = role === 'assistant'
+                ? 'fas fa-chalkboard-user'     // 👩‍🏫 先生
+                : 'fas fa-user-circle';        // 🙂 ユーザー
+        const sideClass = role === 'assistant' ? 'ai' : 'user';
 
-        // ② テンプレートの中はシンプルに
-        const line = `<p><b>${icon}:</b> ${text}</p>`;
-
-        $('#chat-window').append(line).scrollTop(9999);
+        $('#chat-window')
+                .append(`
+          <div class="chat-message ${sideClass}">
+            <i class="icon ${iconClass}"></i>
+            <div class="chat-bubble">${text}</div>
+          </div>
+        `)
+                .scrollTop(1e8);
     }
 
     /* ---------- (4) Today Target を 1 語だけ表示 ---------- */
@@ -1218,8 +1302,8 @@
     async function startAiIntro() {
 
         // 0) UI 側の準備
-        $('#ai-record').prop('disabled', true);   // 録音まだ禁止
-        appendChat('assistant', '⏳ ちょっと待ってね…');
+
+        appendChat('assistant', '<i class="fa-solid fa-hourglass-half"></i>&nbsp;Please&nbsp;wait&hellip;');
 
         // 1) AI へ指示を組み立て
         const sysMsg = `
@@ -1246,11 +1330,6 @@
                 .attr('src', 'data:audio/mp3;base64,' + js.ai_audio)
                 .get(0);
         audioEl.play();
-
-        // 4) 再生が終わったら録音解放
-        audioEl.onended = () => {
-            $('#ai-record').prop('disabled', false);
-        };
 
         // 5) 履歴更新
         aiHistory = js.new_history;

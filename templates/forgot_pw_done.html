@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block body %}
+<h3>Forgot Password</h3>
+<form method="POST">
+  <input name="email" class="form-control" placeholder="your@email.com" required>
+  <button class="btn btn-primary btn-block mt-3">Send reset link</button>
+</form>
+{% if msg %}<div class="alert alert-danger mt-2">{{ msg }}</div>{% endif %}
+{% endblock %}

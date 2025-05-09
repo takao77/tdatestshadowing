@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="alert alert-{{ 'success' if success else 'danger' }}">{{ msg }}</div>
+<a href="/login">← Back to login</a>
+{% endblock %}

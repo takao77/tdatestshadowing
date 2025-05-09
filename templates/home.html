@@ -173,7 +173,11 @@
 
     <!-- 左下アイコン群 -->
     <div class="bottom-left-icons">
-        <button class="icon-btn" title="コース管理" onclick="location.href='/admin/courses'"><i class="fas fa-cog"></i></button>
+        {% if user_id == 2 %}
+        <button class="icon-btn" title="コース管理" onclick="location.href='/admin/courses'">
+            <i class="fas fa-cog"></i>
+        </button>
+        {% endif %}
         <button class="icon-btn" title="CSV アップロード" onclick="location.href='/admin/vocab_upload'"><i class="fas fa-file-csv"></i></button>
         <button class="icon-btn" title="履歴" onclick="goToHistory()"><i class="fas fa-history"></i></button>
         <button class="icon-btn" title="Multiplication Practice" onclick="location.href='/multiplication'">

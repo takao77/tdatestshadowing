@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Train Mode – Polyagent</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+  <style>
+    :root{
+      --accent:#00e6ff;--bg:#0e0e0e;--card:#1b1b1b;--text:#f5f5f5
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:'Poppins',sans-serif;min-height:100vh;display:flex;flex-direction:column;}
+    header{display:flex;align-items:center;gap:.8rem;padding:18px 5vw;}
+    header h1{font-size:1.3rem;font-weight:600;flex:1}
+    header button{background:none;border:none;color:#fff;font-size:1.3rem;cursor:pointer;}
+    main{flex:1;display:flex;flex-direction:column;align-items:center;gap:1.4rem;padding:1.5rem 5vw 4rem;}
+    .card{background:var(--card);border:1px solid #333;border-radius:18px;padding:1.3rem;width:100%;max-width:600px;}
+    .words-list{display:grid;grid-template-columns:1fr 3fr;row-gap:.6rem;font-size:.95rem;}
+    .words-list span:first-child{font-weight:600;color:var(--accent)}
+    .sakura{margin-top:1.2rem;font-size:.95rem;white-space:pre-wrap;line-height:1.45}
+    .controls{display:flex;justify-content:center;gap:2.2rem;margin-top:1.8rem;}
+    .btn{background:var(--accent);border:none;color:#000;font-weight:600;padding:.7rem 2.1rem;border-radius:28px;font-size:1rem;cursor:pointer;transition:.25s}
+    .btn:hover{opacity:.8}
+  </style>
+</head>
+<body>
+  <header>
+    <button onclick="history.back()"><i class="fas fa-arrow-left"></i></button>
+    <h1>Train Mode 電車モード</h1>
+  </header>
+  <main>
+    <div class="card" id="stage">
+      <div id="loading" style="text-align:center">Loading…</div>
+      <div id="content" style="display:none">
+        <h2 style="font-size:1.1rem;margin-bottom:.9rem">Focus Words</h2>
+        <div class="words-list" id="wordGrid"><!-- words inject --></div>
+        <h2 style="margin:1.2rem 0 .4rem">Example Sentence</h2>
+          <p id="exampleText" style="font-size:1rem;line-height:1.4"></p>
+        <div class="sakura" id="sakuraText"><!-- explanation inject --></div>
+      </div>
+    </div>
+
+    <div class="controls">
+    <button class="btn" id="btnPause"><i class="fas fa-pause"></i> Pause</button>
+      <button class="btn" id="btnRepeat"><i class="fas fa-rotate-right"></i> Repeat</button>
+      <button class="btn" id="btnNext"><i class="fas fa-forward"></i> Next</button>
+    </div>
+  </main>
+
+  <audio id="audio1"></audio> <!-- intro words -->
+  <audio id="audioSentence"></audio>
+  <audio id="audioStory"></audio> <!-- sakura story audio -->
+  <audio id="audio2"></audio> <!-- review words -->
+
+  <script>
+    const audioIntro = document.getElementById('audio1');
+    const audioSentence = document.getElementById('audioSentence');
+    const audioStory = document.getElementById('audioStory');
+    const audioReview= document.getElementById('audio2');
+    const loadingEl  = document.getElementById('loading');
+    const contentEl  = document.getElementById('content');
+    const gridEl     = document.getElementById('wordGrid');
+    const sakuraEl   = document.getElementById('sakuraText');
+    const exampleEl = document.getElementById('exampleText');
+
+    const audios = [audioIntro, audioSentence, audioStory, audioReview];
+    let paused = false;
+    const btnPause = document.getElementById('btnPause');
+
+    btnPause.onclick = () => {
+        if (!paused) {
+            // ---- Pause ----
+            audios.forEach(a => {
+                if (!a.paused) a.pause();
+            });
+            btnPause.innerHTML = '<i class="fas fa-play"></i> Resume';
+        } else {
+            // ---- Resume ----
+            audios.forEach(a => {
+                if (a.paused && a.currentTime < a.duration) a.play();
+            });
+            btnPause.innerHTML = '<i class="fas fa-pause"></i> Pause';
+        }
+        paused = !paused;
+    };
+
+    async function loadRound(){
+      loadingEl.style.display='block';contentEl.style.display='none';
+      try{
+        const res = await fetch('/api/train_round');
+        const j = await res.json();
+        // render words
+        gridEl.innerHTML='';
+        j.words.forEach(w=>{
+          gridEl.insertAdjacentHTML('beforeend',`<span>${w.word}</span><span>${w.sentence}</span>`);
+        });
+        sakuraEl.textContent = j.sakura_text || '';
+        exampleEl.textContent = j.example_sentence || '';
+        audioIntro.src = 'data:audio/mp3;base64,'+j.intro_audio;
+        audioSentence.src = 'data:audio/mp3;base64,' + j.sentence_audio;
+        audioStory.src = 'data:audio/mp3;base64,'+j.story_audio;
+        audioReview.src= 'data:audio/mp3;base64,'+j.review_audio;
+
+        // chain play: intro -> story -> review
+        audioIntro.onended    = () => audioSentence.play();
+        audioSentence.onended = ()=> audioStory.play();
+        audioStory.onended = ()=> audioReview.play();
+
+        playSequence();
+        loadingEl.style.display='none';contentEl.style.display='block';
+      }catch(e){console.error(e);loadingEl.textContent='Error loading';}
+    }
+
+    function playSequence(){ audioIntro.play(); }
+
+    document.getElementById('btnRepeat').onclick = ()=> playSequence();
+    document.getElementById('btnNext').onclick   = ()=> loadRound();
+
+    loadRound();
+  </script>
+</body>
+</html>

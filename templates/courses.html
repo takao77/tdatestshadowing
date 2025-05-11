@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browse Courses – Polyagent AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+  <style>
+    :root{
+      --accent:#00e6ff;
+      --bg:#121212;
+      --card:#1d1d1d;
+      --border:#2a2a2a;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:#fff;font-family:'Poppins',sans-serif;min-height:100vh;display:flex;flex-direction:column;}
+    header{display:flex;align-items:center;padding:16px 6vw;gap:.8rem}
+    header h1{font-size:1.4rem;font-weight:600}
+    header button{background:none;border:none;color:#fff;font-size:1.4rem;cursor:pointer;}
+    #grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.4rem;padding:2rem 6vw;width:100%;max-width:1200px;margin:0 auto;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:1.2rem;transition:.25s}
+    .card:hover{border-color:var(--accent);box-shadow:0 0 10px var(--accent)}
+    .card h2{font-size:1rem;margin-bottom:.8rem;color:var(--accent);font-weight:600}
+    .pill{display:inline-block;background:#222;border-radius:14px;padding:5px 12px;font-size:.85rem;margin:4px 4px;color:#ccc;cursor:pointer;transition:.25s}
+    .pill:hover{background:var(--accent);color:#000}
+  </style>
+</head>
+<body>
+  <header>
+    <button onclick="history.back()"><i class="fas fa-arrow-left"></i></button>
+    <h1>Browse Courses</h1>
+  </header>
+  <main>
+    <div id="grid"></div>
+  </main>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    function groupBy(list,key){return list.reduce((m,o)=>((m[o[key]]=m[o[key]]||[]).push(o),m),{});}
+    $(function(){
+      fetch('/get_courses').then(r=>r.json()).then(j=>render(j.courses||[]));
+      function render(data){
+        const $g=$('#grid');
+        const groups=groupBy(data,'category');
+        Object.entries(groups).forEach(([cat,courses])=>{
+          const $c=$('<div>',{class:'card'}).append(`<h2>${cat}</h2>`);
+          courses.forEach(cs=>{
+            $('<span>',{class:'pill',text:cs.name,title:cs.overview||cs.name})
+              .click(()=>location.href=`/shadowing?course=${encodeURIComponent(cs.name)}`)
+              .appendTo($c);
+          });
+          $g.append($c);
+        });
+      }
+    });
+  </script>
+</body>
+</html>

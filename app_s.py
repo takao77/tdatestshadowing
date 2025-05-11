@@ -475,6 +475,7 @@ def tts_to_b64(
     text: str,
     voice: str = DEFAULT_VOICE,
     style: str = DEFAULT_STYLE,
+    rate:  str | None = None,   # ← ★ 追加（例 "85%"  "110%"  "-10%" など）
     fmt: speechsdk.SpeechSynthesisOutputFormat =
          speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
 ) -> str:
@@ -490,6 +491,12 @@ def tts_to_b64(
     speech_cfg.set_speech_synthesis_output_format(fmt)
 
     # --- ★ 名前空間を明示した SSML -------------------------
+    if rate:
+        # prosody で速度調整
+        text_part = f'<prosody rate="{rate}">{text}</prosody>'
+    else:
+        text_part = text
+
     ssml = f"""
 <speak version="1.0"
        xmlns="http://www.w3.org/2001/10/synthesis"
@@ -497,7 +504,7 @@ def tts_to_b64(
        xml:lang="{voice.split('-')[0]}">
   <voice name="{voice}">
     <mstts:express-as style="{style}">
-      {text}
+      {text_part}
     </mstts:express-as>
   </voice>
 </speak>
@@ -797,16 +804,23 @@ def login_user():
         return redirect(url_for('level_select'))
 
 
+# app_s.py  ─ home() ルート
 @app.route('/home')
 def home():
-    # Ensure the user is logged in
     if 'user_id' not in session:
-        return redirect(url_for('login_user'))  # Redirect to login if not authenticated
+        return redirect(url_for('login_user'))
 
+    uid = session['user_id']
+
+    # ⬇︎ ① すでにある helper を再利用して “個人コース名” を取得
+    _, personal_name = ensure_personal_course(uid)   # returns (id, name)
+
+    # ⬇︎ ② personal_course をテンプレへ渡す
     return render_template(
         'home.html',
-        user_name=session.get('user_name'),
-        user_id=session.get('user_id')      # ★ 追加
+        user_name      = session.get('user_name'),
+        user_id        = uid,
+        personal_course= personal_name              # ★ 追加
     )
 
 
@@ -1131,6 +1145,19 @@ def ensure_correct_wav_format(input_file):
     audio.export(wav_output_path, format="wav")
     return wav_output_path
 
+def build_ws_audio(items):
+    combo = AudioSegment.silent(duration=0)
+    for it in items:
+        text = f"{it['word']}. {it['sentence']}"
+        for _ in range(3):                               # 3 回
+            bin_mp3 = generate_speech(
+                text, get_access_token(),
+                'en-US', 'en-US-GuyNeural')
+            seg = AudioSegment.from_file(BytesIO(bin_mp3), format='mp3')
+            combo += seg + AudioSegment.silent(duration=400)
+    buf = BytesIO(); combo.export(buf, format='mp3')
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
 
 # Function to assess pronunciation
 @app.route('/assess_pronunciation', methods=['POST'])
@@ -1339,56 +1366,83 @@ def generate_explanation_cn():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/get_due_vocab', methods=['GET'])
+# ────────────────────────────────────────────────────────────
+#  /api/get_due_vocab  ―  “在庫切れなら低-EF を再抽出” 版
+# ────────────────────────────────────────────────────────────
+# ① 10 分クールダウンを尊重した通常クエリ
+SQL_DUE = """
+    SELECT
+        vi.id        AS vocab_id,
+        vi.sentence,
+        vi.word,
+        ISNULL(lat.ef, 2.5) AS ef
+    FROM dbo.vocab_items vi
+    LEFT JOIN (
+        SELECT vocab_id, ef, review_time,
+               ROW_NUMBER() OVER (PARTITION BY vocab_id ORDER BY review_time DESC) rn
+        FROM dbo.vocab_reviews
+        WHERE user_id = ?
+    ) lat ON vi.id = lat.vocab_id AND lat.rn = 1
+    WHERE vi.course = ?
+      AND (
+            lat.review_time IS NULL
+         OR lat.review_time <= DATEADD(minute,-10,GETUTCDATE())
+      )
+    ORDER BY
+        ISNULL(lat.ef, 3.0) ASC,
+        ISNULL(lat.review_time,'1900-01-01') ASC,
+        NEWID()
+"""
+
+# ② フォールバック：クールダウン無視・低 EF 優先（最大 20 語）
+SQL_FALLBACK = """
+    SELECT TOP 20
+        vi.id        AS vocab_id,
+        vi.sentence,
+        vi.word,
+        ISNULL(lat.ef, 2.5) AS ef
+    FROM dbo.vocab_items vi
+    LEFT JOIN (
+        SELECT vocab_id, ef,
+               ROW_NUMBER() OVER (PARTITION BY vocab_id ORDER BY review_time DESC) rn
+        FROM dbo.vocab_reviews
+        WHERE user_id = ?
+    ) lat ON vi.id = lat.vocab_id AND lat.rn = 1
+    WHERE vi.course = ?
+    ORDER BY ISNULL(lat.ef, 2.5) ASC, NEWID()
+"""
+
+@app.route('/api/get_due_vocab')
 def get_due_vocab():
-    user_id = session.get('user_id')
-    if not user_id:
+    """Shadowing 用: due が無ければクールダウン無視で再抽出"""
+    uid = session.get('user_id')
+    if not uid:
         return jsonify({'error': 'ログインしてください'}), 403
 
     course = request.args.get('course', '')
     if not course:
         return jsonify({'error': 'course パラメータが必要です'}), 400
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
 
-    cursor.execute("""
-            SELECT
-                vi.id        AS vocab_id,
-                vi.sentence,
-                vi.word,
-                ISNULL(vr.ef, 2.5) AS ef            -- ★ 追加: 最新 EF が無ければ 2.5
-            FROM dbo.vocab_items  vi
-            LEFT JOIN (
-                SELECT vocab_id, ef, next_review, review_time,
-                       ROW_NUMBER() OVER (PARTITION BY vocab_id
-                                          ORDER BY review_time DESC) AS rn
-                FROM dbo.vocab_reviews
-                WHERE user_id = ?
-            ) vr ON vi.id = vr.vocab_id AND vr.rn = 1           -- ★ ef を取得
-            WHERE vi.course = ?
-              AND (
-                    vr.review_time IS NULL
-                 OR vr.review_time <= DATEADD(minute,-10,GETUTCDATE())
-              )
-            ORDER BY
-                    COALESCE(vr.ef, 3.0)               ASC,
-                    ISNULL(vr.next_review,'1900-01-01') ASC,
-                    NEWID()
-        """, user_id, course)
+    # ---------- ① 通常の due 抽出 ----------
+    cur.execute(SQL_DUE, uid, course)
+    rows = cur.fetchall()
 
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    # ---------- ② 0 行ならフォールバック ----------
+    if not rows:
+        cur.execute(SQL_FALLBACK, uid, course)
+        rows = cur.fetchall()
 
-    due = [{
-        'vocab_id': row.vocab_id,
-        'sentence': row.sentence,
-        'word':     row.word,
-        'ef': float(row.ef)
-    } for row in rows]
+    cur.close(); conn.close()
 
-    return jsonify(due)
+    # ---------- 整形して返却 ----------
+    return jsonify([{
+        'vocab_id': r.vocab_id,
+        'sentence': r.sentence,
+        'word':     r.word,
+        'ef':       float(r.ef)
+    } for r in rows])
 
 
 @app.route('/submit_practice', methods=['POST'])
@@ -2143,6 +2197,30 @@ def tts_ssml(access_token: str, ssml: str) -> bytes:
     return r.content
 
 
+def sakura_teacher_inner(sentence: str, words: list[str]) -> dict:
+    word_list = ', '.join(f'「{w}」' for w in words)
+    sys_prompt = (
+        "あなたは『さくら先生』というやさしい日本語教師です。\n"
+        f"Sentence: 「{sentence}」\n"
+        f"Words: {word_list}\n\n"
+        "1)まずSentence について意味を簡単に解説し、\n"
+        "2)Words について一つずつ意味を解説してください\n"
+        "Wordsについて、カタカナを使って解説しないでください\n"
+    )
+    gpt = chat_client.chat.completions.create(
+        model=CHAT_DEPLOY,
+        messages=[{"role":"system","content":sys_prompt}],
+        temperature=0.7,
+    )
+    jp_text = gpt.choices[0].message.content.strip()
+
+    ssml     = text_to_ssml(jp_text)                       # JP=Nanami / EN=Aria
+    audio_b64= base64.b64encode(
+                 tts_ssml(get_access_token(), ssml)
+               ).decode('ascii')
+    return {"text": jp_text, "audio": audio_b64}
+
+
 @app.route('/api/sakura', methods=['POST'])
 def sakura_teacher():
     """
@@ -2821,6 +2899,173 @@ def reset_password():
     finally:
         if cur: cur.close()
         conn.close()
+
+
+@app.route('/courses')
+def courses_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))      # 未ログインならログイン画面へ
+
+    return render_template(
+        'courses.html',
+        user_id   = session['user_id'],             # 使わなければ省略可
+        user_name = session.get('user_name', '')    # 〃
+    )
+
+
+# ─────────────────────────────────────────────────────────
+#  /api/train_round
+#    1. パーソナル辞書から「EF が低い or 未学習」の語を 5 語取得
+#    2. 単語+例文を 3 回読む音声 (intro / review) を生成
+#    3. 5 語すべてを含む英文を GPT で生成し
+#       既存関数 sakura_teacher() で日本語解説+音声を取得
+#    4. 3 種の音声 + テキストを JSON で返す
+# ─────────────────────────────────────────────────────────
+from pydub import AudioSegment
+from io    import BytesIO
+import base64
+
+@app.route('/api/train_round')
+def api_train_round():
+    # ── ① 認証とパーソナル辞書名 ─────────────────────
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({'error': 'login'}), 403
+
+    _, personal_name = ensure_personal_course(uid)   # category_id = 4
+
+    # ── ② EF が低い or 未学習の語を 5 語抽出 ─────────
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        WITH latest AS (
+            SELECT vocab_id, ef,
+                   ROW_NUMBER()OVER(PARTITION BY vocab_id
+                                     ORDER BY review_time DESC) rn
+              FROM dbo.vocab_reviews
+             WHERE user_id = ?
+        )
+        SELECT TOP 5
+               vi.id, vi.word, vi.sentence,
+               ISNULL(lat.ef, 0) AS ef
+          FROM dbo.vocab_items vi
+          LEFT JOIN latest lat
+                 ON vi.id = lat.vocab_id AND lat.rn = 1
+         WHERE vi.course = ?
+           AND NOT EXISTS (
+                SELECT 1
+                  FROM dbo.train_round_seen s
+                 WHERE s.user_id   = ?
+                   AND s.vocab_id  = vi.id
+                   AND s.seen_time >= DATEADD(minute, -10, GETUTCDATE())
+           )
+         ORDER BY ISNULL(lat.ef,0) ASC,
+                  NEWID()
+    """, uid, personal_name, uid)
+    rows = cur.fetchall()
+
+    if len(rows) < 5:  # パーソナル辞書が足りない
+        short = 5 - len(rows)  # まだ必要な語数
+
+        cur.execute("""
+                    /*―― ① ユーザーの最新レビュー行を作る ――*/
+                    WITH latest AS (SELECT vocab_id,
+                                           ef,
+                                           ROW_NUMBER() OVER (
+                           PARTITION BY vocab_id
+                           ORDER BY review_time DESC) AS rn
+                                    FROM dbo.vocab_reviews
+                                    WHERE user_id = ?)
+                    /*―― ② EF が低い順に不足ぶんだけ取得 ――*/
+                    SELECT TOP(?) vi.id, vi.word,
+                           vi.sentence,
+                           ISNULL(lat.ef, 0) AS ef
+                    FROM latest AS lat
+                             JOIN dbo.vocab_items AS vi
+                                  ON vi.id = lat.vocab_id
+                    WHERE lat.rn = 1 -- vocab_id ごと最新 1 行
+                      AND lat.ef < 10 -- ★低 EF だけ
+                      AND NOT EXISTS ( -- ★10 分以内に出題していない
+                        SELECT 1
+                        FROM dbo.train_round_seen AS s
+                        WHERE s.user_id = ?
+                          AND s.vocab_id = vi.id
+                          AND s.seen_time >= DATEADD(minute,-10, GETUTCDATE()))
+                    ORDER BY lat.ef ASC, NEWID(); -- ★EF が小さいほど先に
+                    """, (uid, short, uid))
+
+        rows.extend(cur.fetchall())
+
+    # ── ③-B 5 語未満ならランダム補充 ──────────────
+    if len(rows) < 5:
+        cur.execute("""
+            SELECT TOP 5 id, word, sentence
+              FROM dbo.vocab_items
+             WHERE course = ?
+             ORDER BY NEWID()
+        """, personal_name)
+        rows = cur.fetchall()
+
+    words = [{"id": r.id, "word": r.word, "sentence": r.sentence} for r in rows]
+
+    if len(words) < 5:
+        cur.close(); conn.close()
+        return jsonify({"error": "need ≥5 items"}), 500
+
+    # ── ③-C 取得した語を履歴テーブルに登録 ──────
+    cur.executemany(
+        "INSERT INTO dbo.train_round_seen(user_id, vocab_id) VALUES (?,?)",
+        [(uid, w["id"]) for w in words]
+    )
+    conn.commit()
+    cur.close(); conn.close()
+
+    intro_b64  = build_ws_audio(words)   # 最初
+    review_b64 = build_ws_audio(words)   # おさらい
+
+    # ── ④ 5 語入り英文を GPT で生成 ─────────────────
+    prompt = ("Teach me most common collocation of one of the words: "
+              + ', '.join(w['word'] for w in words) + '.')
+    gpt = chat_client.chat.completions.create(
+        model=CHAT_DEPLOY,
+        messages=[{"role": "user", "content": prompt}],
+        max_completion_tokens=80,
+        temperature=0.7
+    )
+    example_sentence = gpt.choices[0].message.content.strip()
+
+    example_audio_b64 = tts_to_b64(
+        example_sentence,
+        voice="en-US-OnyxTurboMultilingualNeural",
+        style="general",
+        rate="0.9"
+    )
+
+    # ── ⑤ さくら先生で解説と音声 ────────────────────
+
+    sakura_res = sakura_teacher_inner(
+        sentence=example_sentence,
+        words=[w['word'] for w in words])  # 5 語全部
+    # 期待返り値: {'text': ..., 'audio': ...}
+
+    # ── ⑥ クライアントへ返却 ────────────────────────
+    return jsonify({
+        'words'       : words,                 # [{word, sentence} ×5]
+        'intro_audio' : intro_b64,             # 単語+例文×3 (前半)
+        "example_sentence": example_sentence,
+        'sentence_audio': example_audio_b64,
+        'story_audio' : sakura_res['audio'],   # さくら先生 (例文解説)
+        'review_audio': review_b64,            # 単語+例文×3 (後半)
+        'sakura_text' : sakura_res['text']     # 日本語解説テキスト
+    })
+
+
+@app.route('/train')
+def train_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('train.html',
+                           user_id   = session['user_id'],
+                           user_name = session.get('user_name',''))
 
 
 if __name__ == '__main__':

@@ -5,24 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Liona's Multiplication Practice</title>
   <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"/>
   <style>
     :root{--bg:#f5f7fa;--card:#fff;--accent:#3498db;--accent-light:#5dade2;--text:#2c3e50;--correct:#2ecc71;--wrong:#e74c3c}
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--bg);color:var(--text);font-family:'Raleway',sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:1rem}
 
-    /* ── layout ── */
+    /* layout */
     .container{display:flex;gap:1.2rem;align-items:stretch}
     .sidebar{background:var(--card);border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:1rem .8rem;display:flex;flex-direction:column;gap:.6rem}
     .sidebar button{width:48px;height:48px;border:none;border-radius:10px;font-size:1.2rem;font-weight:600;cursor:pointer;color:#fff;background:#7f8c8d;transition:background .25s,transform .15s}
-    .sidebar button:hover{transform:scale(1.05)}
-    .sidebar button.active{background:var(--accent)}
+    .sidebar button:hover{transform:scale(1.05)} .sidebar button.active{background:var(--accent)}
 
     .card{position:relative;overflow:hidden;background:var(--card);border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:2rem 2.5rem;width:100%;max-width:520px;text-align:center}
-    h1{font-size:1.6rem;margin-bottom:1rem}
-    #question{font-size:2.2rem;font-weight:600;margin-bottom:1.1rem}
+    h1{font-size:1.6rem;margin-bottom:1rem} #question{font-size:2.2rem;font-weight:600;margin-bottom:1.1rem}
 
-    /* input & main button */
+    /* input */
     input.answer{width:140px;padding:10px 12px;font-size:1.2rem;border:2px solid var(--accent);border-radius:8px;text-align:center;outline:none}
     button.main{background:var(--accent);border:none;color:#fff;font-size:1.1rem;padding:10px 18px;border-radius:8px;cursor:pointer;transition:background .25s}
     button.main:hover{background:var(--accent-light)}
@@ -32,34 +30,42 @@
     .hint{font-size:.85rem;opacity:.75;margin-top:.6rem}
     .stats-link{position:absolute;top:18px;right:18px;font-size:1.8rem;color:var(--accent);text-decoration:none}
 
+    .chick-counter-inline {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: var(--accent);
+        margin-top: .8rem;
+    }
     /* keypad */
     .keypad{display:grid;grid-template-columns:repeat(3,70px);gap:.5rem;justify-content:center;margin:1.2rem 0 0}
     .keypad button{padding:14px 0;font-size:1.2rem;border-radius:10px;width:70px}
 
-    /* reward animation */
-    @keyframes floatUp{0%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(-120px) scale(1.4);opacity:0}}
-    .reward{position:absolute;font-size:1.8rem;pointer-events:none;animation:floatUp 1.2s ease-out forwards}
+    /* reward */
+    @keyframes floatUp{0%{transform:translateY(0) scale(1);opacity:1}
+                       80%{opacity:1}
+                       100%{transform:translateY(-160px) scale(1.4);opacity:0}}
+    .reward{position:absolute;font-size:1.8rem;pointer-events:none;animation:floatUp 2.2s ease-out forwards}
 
-    /* responsive */
     @media(max-width:700px){.container{flex-direction:column;align-items:center}.sidebar{flex-direction:row;justify-content:center}}
+    @keyframes popScale{
+      0%{transform:scale(.3);opacity:0}
+      20%{transform:scale(1.1);opacity:1}
+      40%{transform:scale(.9)}
+      60%{transform:scale(1)}
+      100%{transform:scale(1);opacity:1}
+    }
+    #celebrate{animation:popScale .6s ease-out;}
   </style>
 </head>
 <body>
   <div class="container">
-    <!-- ── Sidebar for selecting table ── -->
     <div class="sidebar" id="sidebar">
       <button data-base="0" class="active" title="All tables">☆</button>
-      <button data-base="2">2</button>
-      <button data-base="3">3</button>
-      <button data-base="4">4</button>
-      <button data-base="5">5</button>
-      <button data-base="6">6</button>
-      <button data-base="7">7</button>
-      <button data-base="8">8</button>
-      <button data-base="9">9</button>
+      <button data-base="2">2</button><button data-base="3">3</button><button data-base="4">4</button>
+      <button data-base="5">5</button><button data-base="6">6</button><button data-base="7">7</button>
+      <button data-base="8">8</button><button data-base="9">9</button>
     </div>
 
-    <!-- ── Main card ── -->
     <div class="card" id="card">
       <a href="/multiplication_dashboard" class="stats-link" title="View Stats"><i class="fas fa-chart-bar"></i></a>
 
@@ -71,7 +77,6 @@
         <button type="submit" class="main">Check</button>
       </form>
 
-      <!-- keypad -->
       <div class="keypad" id="keypad">
         <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button>
         <button data-val="4">4</button><button data-val="5">5</button><button data-val="6">6</button>
@@ -81,107 +86,121 @@
       </div>
 
       <div id="feedback"></div>
+        <div id="chick-counter" class="chick-counter-inline">🐥 × 0</div>
       <div id="score"></div>
       <p class="hint">Choose a table on the left, tap numbers or type, then press <b>Check</b>.</p>
     </div>
   </div>
-
+  <div id="celebrate"
+       style="display:none;
+          position:fixed;inset:0;z-index:2000;
+          backdrop-filter:blur(4px);
+          justify-content:center;align-items:center;
+          font-size:2.4rem;font-weight:700;color:var(--accent);">
+      🎉🎉 CONGRATULATIONS! 🎉🎉<br>
+      You saved chick’s family!
+  </div>
 <script>
-/* -------- helper: log answer to DB -------- */
-async function logAttempt(expr, answer, isCorrect){
-  try{
-    await fetch('/api/multiplication_log', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({expression:expr, answer, correct:isCorrect})
-    });
-  }catch(e){console.warn('log error', e);}
+/* DOM refs & state */
+const sidebar=document.getElementById('sidebar');
+const card=document.getElementById('card');
+const qEl=document.getElementById('question');
+const form=document.getElementById('answer-form');
+const input=document.getElementById('answer-input');
+const feedback=document.getElementById('feedback');
+const scoreEl=document.getElementById('score');
+const pad=document.getElementById('keypad');
+const chickEl=document.getElementById('chick-counter');
+
+let a,b,correctAns,total=0,correct=0;
+let chickCount=0; const targetChicks=10; let currentBase=0;
+
+function updateScore(){scoreEl.textContent=`Score: ${correct} / ${total}`;}
+function updateChick(){chickEl.textContent=`🐥 × ${chickCount}`;}
+
+function celebrate(){
+  const ov = document.getElementById('celebrate');
+  if(!ov) return;                     // 取れなければ中断
+  ov.style.display = 'flex';          // 表示
+  setTimeout(()=>{ ov.style.display = 'none'; }, 3000); // 3 秒後に隠す
 }
 
-/* -------- DOM refs -------- */
-const sidebar = document.getElementById('sidebar');
-const card    = document.getElementById('card');
-const qEl     = document.getElementById('question');
-const form    = document.getElementById('answer-form');
-const input   = document.getElementById('answer-input');
-const feedback= document.getElementById('feedback');
-const scoreEl = document.getElementById('score');
-const pad     = document.getElementById('keypad');
-
-/* -------- state -------- */
-let a, b, correctAns;
-let total = 0, correct = 0;
-let currentBase = 0;   // 0 = all tables
-function updateScore(){scoreEl.textContent = `Score: ${correct} / ${total}`;}
-
-/* -------- reward animation -------- */
 function showReward(){
-  const emos = ['🐶','🐱','🐰','🦊','🐥','🦄','🌈','⭐'];
-  for(let i=0;i<6;i++){
-    const span = document.createElement('span');
-    span.textContent = emos[Math.floor(Math.random()*emos.length)];
-    span.className   = 'reward';
-    span.style.left  = Math.random()*90 + 5 + '%';
-    span.style.bottom= '20px';
-    span.style.animationDelay = i*0.05 + 's';
-    card.appendChild(span);
-    span.addEventListener('animationend', ()=> span.remove());
+  const emos=['🐥','🐶','🐱','🦊','🐰','🦄','🐼','🌈','⭐'];
+  let newChicks=0;
+  for(let i=0;i<8;i++){
+    const emo=emos[Math.floor(Math.random()*emos.length)];
+    if(emo==='🐥') newChicks++;
+    const s=document.createElement('span');
+    s.textContent=emo; s.className='reward';
+    s.style.left=Math.random()*90+5+'%'; s.style.bottom='20px';
+    s.style.animationDelay=i*0.08+'s';
+    card.appendChild(s); s.addEventListener('animationend',()=>s.remove());
   }
+  return newChicks;
 }
 
-/* -------- fetch question from API -------- */
 async function fetchQuestion(){
-  try{
-    const url = currentBase ? `/api/get_multip_question?base=${currentBase}` : '/api/get_multip_question';
-    const res = await fetch(url);
-    const j   = await res.json();
-    a = j.a; b = j.b; correctAns = a*b;
-    qEl.textContent = `${a} × ${b} = ?`;
-    input.value=''; feedback.textContent=''; input.focus();
-  }catch(e){
-    qEl.textContent = 'Error fetching question';
-  }
+  const url=currentBase?`/api/get_multip_question?base=${currentBase}`:'/api/get_multip_question';
+  const {a:aa,b:bb}=await (await fetch(url)).json();
+  a=aa; b=bb; correctAns=a*b;
+  qEl.textContent=`${a} × ${b} = ?`;
+  input.value=''; feedback.textContent=''; input.focus();
 }
 
-/* -------- show result -------- */
+async function log(expr,answer,isCorrect){
+  try{await fetch('/api/multiplication_log',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({expression:expr,answer,correct:isCorrect})});}catch{}
+}
+
 async function showResult(ok, answer){
-  feedback.textContent = ok ? '✔ Correct! Great job!' : `✖ Oops! The correct answer is ${correctAns}.`;
-  feedback.style.color = ok ? 'var(--correct)' : 'var(--wrong)';
-  if(ok) showReward();
-  await logAttempt(`${a}*${b}`, answer, ok);
-  setTimeout(fetchQuestion, 1200);
+  const prev = chickCount;                  // 変更前の匹数
+
+  if (ok){
+    const added = showReward();             // 今回出た 🐥 の数 (0-8)
+    if (added) {
+      chickCount = Math.min(targetChicks, chickCount + added);
+    }
+
+    /* 🐥 がちょうど 10 匹になった瞬間だけ祝う */
+    if (prev < targetChicks && chickCount === targetChicks){
+      celebrate();                          // 3 秒オーバーレイ
+      feedback.textContent = '';            // カード内は空白
+    }else{
+      feedback.textContent = '✔ Correct! Great job!';
+      feedback.style.color = 'var(--correct)';
+    }
+  }else{                                    // 不正解
+    if (chickCount > 0) chickCount--;       // 1 匹だけ逃げる
+    feedback.textContent = `✖ Oops! The correct answer is ${correctAns}.`;
+    feedback.style.color = 'var(--wrong)';
+  }
+
+  updateChick();                            // 🐥 × n 表示更新
+  await log(`${a}*${b}`, answer, ok);       // DB ログ
+  setTimeout(fetchQuestion, 1200);          // 次の問題へ
 }
 
-/* -------- form submit -------- */
-form.addEventListener('submit', e => {
+/* event handlers */
+form.addEventListener('submit',e=>{
   e.preventDefault();
-  const ans = parseInt(input.value, 10);
-  if(isNaN(ans)) return;
-  total++; const ok = ans === correctAns;
-  if(ok) correct++;
-  updateScore();
-  showResult(ok, ans);
+  const ans=parseInt(input.value,10); if(isNaN(ans)) return;
+  total++; if(ans===correctAns) correct++;
+  updateScore(); showResult(ans===correctAns,ans);
+});
+pad.addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.val!=null){input.value+=b.dataset.val;input.focus();return;}
+  if(b.dataset.act==='clear') input.value=''; else if(b.dataset.act==='del') input.value=input.value.slice(0,-1);
+});
+sidebar.addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  sidebar.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); currentBase=parseInt(b.dataset.base,10); fetchQuestion();
 });
 
-/* -------- keypad clicks -------- */
-pad.addEventListener('click', e=>{
-  const btn = e.target.closest('button'); if(!btn) return;
-  if(btn.dataset.val!=null){input.value += btn.dataset.val; input.focus(); return;}
-  if(btn.dataset.act==='clear'){input.value=''; return;}
-  if(btn.dataset.act==='del'){input.value = input.value.slice(0,-1);}
-});
-
-/* -------- sidebar selection -------- */
-sidebar.addEventListener('click', e=>{
-  const btn = e.target.closest('button'); if(!btn) return;
-  sidebar.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  currentBase = parseInt(btn.dataset.base, 10);
-  fetchQuestion();
-});
-
-/* -------- init -------- */
-fetchQuestion();
-updateScore();
+/* init */
+fetchQuestion(); updateScore(); updateChick();
 </script>
 </body>
 </html>

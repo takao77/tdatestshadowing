@@ -1,0 +1,185 @@
+{% extends 'base.html' %}
+{% block title %}Vocabulary Boost{% endblock %}
+
+{% block head %}
+<style>
+:root{
+  --accent-from:#00e6ff;
+  --accent-to:#8a35ff;
+  --bg:#111;
+  --glass:rgba(255,255,255,.06);
+  --blur:12px;
+}
+body{background:var(--bg)!important;color:#fff}
+
+/* ── 帰宅アイコン ───────────────── */
+.back-btn{
+  position:fixed;top:18px;left:20px;z-index:1000;
+  font-size:28px;color:#fff;text-decoration:none;
+  background:var(--glass);border:1px solid rgba(255,255,255,.15);
+  padding:6px 14px;border-radius:10px;
+  backdrop-filter:blur(var(--blur));
+}
+.back-btn:hover{background:rgba(255,255,255,.15)}
+
+/* ── カード ------------------------------------------------ */
+.card{
+  background:var(--glass);
+  backdrop-filter:blur(var(--blur));
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:22px;
+  padding:28px;
+  max-width:440px;
+  margin:10vh auto;
+  text-align:center;
+}
+.stat{
+  font-size:2.6rem;margin-bottom:6px;
+  background:linear-gradient(135deg,var(--accent-from),var(--accent-to));
+  -webkit-background-clip:text;color:transparent;
+}
+small{opacity:.75}
+
+/* ── Add 5 Words ボタン ----------------------------------- */
+#add-btn{
+  display:inline-block;border:none;border-radius:50px;
+  padding:14px 34px;margin-bottom:20px;
+  font-size:1rem;color:#fff;
+  background:linear-gradient(135deg,var(--accent-from),var(--accent-to));
+  cursor:pointer;transition:.25s;
+}
+#add-btn:disabled{opacity:.5;cursor:not-allowed}
+#add-btn:hover:not(:disabled){transform:translateY(-2px)}
+
+/* ── 候補＋例文リスト -------------------------------------- */
+#cand-list{list-style:none;padding-left:0;margin:0 0 18px;display:none}
+#cand-list li{margin:5px 0;font-size:1.05rem;line-height:1.35}
+#cand-list li strong{color:var(--accent-from)}
+
+/* ── Toast ------------------------------------------------ */
+#toast-wrap{position:fixed;bottom:18px;right:18px;z-index:2000}
+</style>
+{% endblock %}
+
+{% block body %}
+<a href="/home" class="back-btn"><i class="fa-solid fa-house-chimney-window"></i></a>
+
+<div class="card">
+  <!-- ―― 例文付き候補５語 ――――――――――― -->
+  <ul id="cand-list"></ul>
+  <button id="add-btn" style="display:none">
+    <i class="fas fa-magic mr-1"></i>Add 5 Words
+  </button>
+
+  <!-- ―― 語彙プロフィール ――――――――――― -->
+  <h2>Your Vocabulary Profile</h2>
+  <div id="loading">Loading…</div>
+
+  <div id="result" style="display:none">
+    <div class="stat" id="lemma-num">—</div>
+    <small id="cefr">CEFR: —</small>
+    <p id="comment" style="margin-top:14px"></p>
+  </div>
+</div>
+<!-- Toast container -->
+<div id="toast-wrap"></div>
+{% endblock %}
+
+{% block script %}
+<script>
+/* ---------- ユーティリティ ---------- */
+function olderThan30(iso){
+  if(!iso) return true;
+  return (Date.now() - Date.parse(iso)) > 30*24*60*60*1000;
+}
+
+function showProfile(j){
+  document.getElementById('lemma-num').textContent = (j.lemmas||0).toLocaleString();
+  document.getElementById('cefr').textContent      = 'CEFR: '+(j.cefr||'');
+  document.getElementById('comment').textContent   = j.comment||'';
+  document.getElementById('loading').style.display='none';
+  document.getElementById('result').style.display ='block';
+  document.getElementById('add-btn').style.display='inline-block';
+}
+
+function toast(msg){
+  const id='t'+Date.now();
+  toastWrap.insertAdjacentHTML('beforeend',`
+     <div id="${id}" class="toast text-white bg-success" role="alert" data-delay="15000">
+       <div class="toast-body">${msg}</div>
+     </div>`);
+  $('#'+id).toast('show').on('hidden.bs.toast',e=>e.target.remove());
+}
+
+/* ---------- 要素参照 ---------- */
+const lemma_num=$('#lemma-num')[0],
+      cefr     =$('#cefr')[0],
+      comment  =$('#comment')[0],
+      loading  =$('#loading')[0],
+      result   =$('#result')[0],
+      addBtn   =$('#add-btn')[0],
+      ul       =$('#cand-list')[0],
+      toastWrap=$('#toast-wrap')[0];
+
+/* ---------- ① プロフィール取得 ---------- */
+fetch('/api/personal_vocab/profile_cached')
+  .then(r=>r.json())
+  .then(j=>{
+      if(!j.ok || olderThan30(j.updated)){
+          return fetch('/api/personal_vocab/profile').then(r2=>r2.json());
+      }
+      return j;
+  })
+  .then(j=>{
+      if(!j.ok) throw new Error(j.error||'error');
+      showProfile(j);
+  })
+  .catch(e=>{
+      document.getElementById('loading').textContent='Error: '+e.message;
+  });
+
+/* ---------- ② Add 5 Words ボタン ---------- */
+document.getElementById('add-btn').onclick = async function(){
+  const btn=this, ul=document.getElementById('cand-list');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner-border spinner-border-sm"></span>';
+
+  try{
+    /* 2-1) 候補5語取得 */
+    const res  = await fetch('/api/personal_vocab/candidates',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({flavor:'general'})
+    });
+    const cj = await res.json();
+    if(!res.ok||!cj.ok) throw new Error(cj.error||'candidate error');
+
+    /* 2-2) 例文取得 */
+    const exRes = await fetch('/api/personal_vocab/examples',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({words:cj.words})
+    });
+    const ej = await exRes.json();
+    if(!exRes.ok||!ej.ok) throw new Error(ej.error||'example error');
+
+    /* 2-3) 画面反映 */
+    ul.innerHTML='';
+    ej.examples.forEach(it=>{
+        const li=document.createElement('li');
+        li.innerHTML=`<strong>${it.word}</strong>: ${it.sentence}`;
+        ul.appendChild(li);
+    });
+    ul.style.display='block';
+    toast('5 words added to your personal dictionary!');
+
+  }catch(e){
+    ul.style.display='block';
+    ul.innerHTML='<li style="color:#f66">'+e.message+'</li>';
+  }finally{
+    btn.disabled=false;
+    btn.innerHTML='<i class="fas fa-magic mr-1"></i>Add 5 Words';
+  }
+};
+</script>
+{% endblock %}

@@ -3068,6 +3068,293 @@ def train_page():
                            user_name = session.get('user_name',''))
 
 
+@app.route('/profile')
+def vocab_profile_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('profile.html')
+
+
+@app.route('/api/personal_vocab/profile')
+def vocab_profile_api():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+    uid = session['user_id']
+
+    # ── ① パーソナル辞書 (category_id=4) の全単語を取得 ─────────
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT vi.word
+          FROM dbo.courses c
+          JOIN dbo.vocab_items vi ON vi.course_id = c.id
+         WHERE c.owner_user_id = ? AND c.category_id = 4
+           AND vi.word IS NOT NULL
+    """, uid)
+    words = [r.word for r in cur.fetchall()]
+    cur.close(); conn.close()
+
+    if not words:
+        return jsonify({'error': 'empty'}), 404
+
+    sample = ', '.join(words[:400])        # 多すぎるとプロンプト肥大
+    total  = len(words)
+
+    # ── ② o4-mini にレポートを依頼（JSON で返させる） ────────
+    prompt = (
+        "You are an English-vocabulary analyst.\n"
+        f"The learner has {total} personal dictionary entries. "
+        "Here is a sample list:\n"
+        f"{sample}\n\n"
+        "Estimate:\n"
+        "1. Total lemma size (English lemmas they probably know)\n"
+        "2. CEFR level (A1–C2)\n"
+        "Return ONE JSON object with keys \"lemmas\", \"cefr\", \"comment\".\n"
+        "comment MUST be ≤40 English words."
+    )
+
+    rsp = o4_client.chat.completions.create(
+        model   = O4_DEPLOY,                        # 例: "o4-mini"
+        messages=[{"role": "system", "content": prompt}],
+        max_completion_tokens = 2000,
+        response_format       = {"type": "json_object"}
+    )
+
+    try:
+        data = json.loads(rsp.choices[0].message.content)
+    except Exception:
+        return jsonify({'error': 'parse'}), 502
+
+    # ───────── ★ ここに “users テーブル更新” を追記 ─────────
+    conn = get_db_connection();
+    cur = conn.cursor()
+    cur.execute("""
+                UPDATE dbo.users
+                SET vocab_lemmas          = ?,
+                    vocab_cefr            = ?,
+                    vocab_comment         = ?,
+                    vocab_profile_updated = GETUTCDATE()
+                WHERE id = ?
+                """,
+                int(data.get('lemmas', 0)),
+                str(data.get('cefr', ''))[:2],  # 例: "B2"
+                data.get('comment', '')[:200],  # 200 文字に切り詰め
+                uid  # ← session の user_id
+                )
+    conn.commit()
+    cur.close();
+    conn.close()
+    # ────────────────────────────────────────────────
+
+    return jsonify({'ok': True, **data})
+
+
+@app.route('/api/personal_vocab/profile_cached')
+def vocab_profile_cached():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+
+    uid = session['user_id']
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT vocab_lemmas, vocab_cefr, vocab_comment,
+               vocab_profile_updated
+          FROM dbo.users WHERE id = ?
+    """, uid)
+    row = cur.fetchone()
+    cur.close(); conn.close()
+
+    if not row or row.vocab_lemmas is None:
+        return jsonify({'ok': False})              # まだ未計算
+
+    return jsonify({
+        'ok': True,
+        'lemmas':   int(row.vocab_lemmas),
+        'cefr':     row.vocab_cefr or '',
+        'comment':  row.vocab_comment or '',
+        'updated':  row.vocab_profile_updated.isoformat() if row.vocab_profile_updated else ''
+    })
+
+
+def norm(w:str)->str:
+    """空白除去＋小文字化"""
+    return re.sub(r'\s+', '', w or '').lower()
+
+
+@app.route('/api/personal_vocab/candidates', methods=['POST'])
+def vocab_candidates():
+    """
+    1. users.vocab_* を参照して学習者レベルを取得
+    2. パーソナル辞書の全単語を known_set に格納
+    3. そこからランダム 50 語だけ GPT へヒントとして渡す
+    4. GPT (o4-mini) に EXACTLY 5 語を要求
+    5. サーバ側で重複除去 ─ 足りなければ最大 3 回まで再試行
+    """
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+    uid = session['user_id']
+    flavor = (request.json or {}).get('flavor', 'general').lower()
+
+    # ── ① プロフィール取得 ───────────────────────────
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT vocab_lemmas, vocab_cefr
+          FROM dbo.users WHERE id = ?
+    """, uid)
+    row = cur.fetchone()
+    if not row or row.vocab_lemmas is None:
+        cur.close(); conn.close()
+        return jsonify({'error': 'profile_required'}), 409
+    lemmas_est = int(row.vocab_lemmas)
+    cefr_est   = row.vocab_cefr or 'B1'
+
+    cur.execute("""
+                WITH latest AS (SELECT vocab_id,
+                                       ISNULL(ef, 0) AS ef,
+                                       ROW_NUMBER()     OVER (PARTITION BY vocab_id ORDER BY review_time DESC) rn
+                                FROM dbo.vocab_reviews
+                                WHERE user_id = ?)
+                SELECT TOP 50 vi.word, lat.ef
+                FROM dbo.courses c
+                         JOIN dbo.vocab_items vi ON vi.course_id = c.id
+                         LEFT JOIN latest lat ON lat.vocab_id = vi.id AND lat.rn = 1
+                WHERE c.owner_user_id = ?
+                  AND c.category_id = 4
+                  AND vi.word IS NOT NULL
+                ORDER BY ISNULL(lat.ef, 0) ASC, NEWID() -- EF が低い順、同点はランダム
+                """, uid, uid)
+    rows = cur.fetchall()
+    known_set = {norm(r.word) for r in rows}  # 低 EF 50 語を既知セットにも使う
+    cur.close();
+    conn.close()
+
+    # rows は EF が低い順に最大 50 行だけ返ってくる
+    sample_words = [r.word for r in rows]  # そのまま配列化
+    sample_hint = ', '.join(sample_words)  # GPT へのヒント
+
+    # ── ③ GPT プロンプト（flavor 追加） ────────────────
+    flavor_note = {
+        'idiom':'Focus on idioms or phrasal verbs. ',
+        'slang':'Focus on informal Gen-Z slang. ',
+        'business':'Focus on business English terms. '
+    }.get(flavor, '')
+
+    base_prompt = (
+        "You are an English-vocabulary tutor.\n"
+        f"The learner knows about {lemmas_est:,} lemmas and is around CEFR {cefr_est}.\n"
+        + flavor_note +
+        "Avoid duplicates from the list below and propose EXACTLY 5 new words "
+        "at the same level or slightly higher.\n"
+        "Return ONE JSON object ONLY: {\"words\": [\"...\", ...]}.\n\n"
+        f"Known words sample: {sample_hint}"
+    )
+
+    # ── ④ 最大 3 回まで試行 ──────────────────────────
+    for attempt in range(3):
+        rsp = o4_client.chat.completions.create(
+            model   = O4_DEPLOY,
+            messages=[{"role":"system","content":base_prompt}],
+            max_completion_tokens = 2000,
+            response_format       = {"type":"json_object"}
+        )
+        try:
+            words_raw = json.loads(rsp.choices[0].message.content).get('words', [])
+        except Exception:
+            # パース失敗 → もう一度
+            time.sleep(0.4); continue
+
+        # ── ⑤ 重複フィルタ ─────────────────────────
+        clean, seen = [], set()
+        for w in words_raw:
+            nw = norm(w)
+            if nw and nw not in known_set and nw not in seen:
+                clean.append(w.strip()); seen.add(nw)
+            if len(clean) == 5:
+                break
+
+        if len(clean) == 5:      # 成功
+            return jsonify({'ok': True, 'words': clean})
+
+        # 失敗 → 少し待って再リクエスト
+        time.sleep(0.4)
+
+    # 3 回失敗
+    return jsonify({'error': 'duplicate'}), 409
+
+
+# -----------------------------------------------------------------
+# /api/personal_vocab/examples  POST  {"words":["..."]}
+#   → 例文リストを返しつつ personal 辞書に自動追加
+# -----------------------------------------------------------------
+@app.route('/api/personal_vocab/examples', methods=['POST'])
+def vocab_examples():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+    uid = session['user_id']
+    words = (request.get_json(force=True) or {}).get('words', [])
+
+    # ------- バリデーション --------------------------------------
+    if (not isinstance(words, list) or
+        not all(isinstance(w, str) for w in words) or
+        len(words) == 0 or len(words) > 10):
+        return jsonify({'error': 'bad_request'}), 400
+
+    # ------- GPT で例文生成 --------------------------------------
+    prompt = (
+        "Give ONE concise (≤15 words) example sentence for each word below.\n"
+        "Return ONE JSON object mapping words to sentences.\n\n"
+        f"Words: {', '.join(words)}"
+    )
+    rsp = o4_client.chat.completions.create(
+        model   = O4_DEPLOY,
+        messages=[{"role":"system","content":prompt}],
+        max_completion_tokens=2000,
+        response_format={"type":"json_object"}
+    )
+    try:
+        obj = json.loads(rsp.choices[0].message.content)
+    except Exception:
+        return jsonify({'error': 'parse'}), 502
+
+    examples = [
+        {"word": w, "sentence": (obj.get(w) or '').strip()}
+        for w in words if (obj.get(w) or '').strip()
+    ]
+    if not examples:
+        return jsonify({'error': 'no_examples'}), 502
+
+    # ------- personal 辞書に自動追加 -----------------------------
+    course_id, course_name = ensure_personal_course(uid)  # helper 既存
+    conn = get_db_connection(); cur = conn.cursor()
+
+    for ex in examples:
+        # ① すでに登録済みならスキップ
+        cur.execute("""
+            SELECT 1 FROM dbo.vocab_items
+             WHERE course_id = ? AND word = ?
+        """, course_id, ex['word'])
+        if cur.fetchone():
+            continue
+
+        # ② INSERT
+        cur.execute("""
+            INSERT INTO dbo.vocab_items (course_id, course, sentence, word)
+            VALUES (?, ?, ?, ?)
+        """, course_id, course_name, ex['sentence'], ex['word'])
+
+    conn.commit(); cur.close(); conn.close()
+
+    return jsonify({'ok': True, 'examples': examples})
+
+
+@app.route('/boost')
+def boost_page():
+    """Boost – AI が単語5件を提案するページ"""
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))   # 未ログインならログインへ
+    return render_template('boost.html',
+                           user_name=session.get('user_name', ''))
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

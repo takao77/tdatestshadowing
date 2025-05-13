@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}User Settings{% endblock %}
+
+{% block head %}
+<style>
+:root{--glass:rgba(255,255,255,.07);--blur:12px}
+body{background:#111;color:#fff}
+.card{
+  max-width:480px;margin:9vh auto;padding:28px;
+  backdrop-filter:blur(var(--blur));background:var(--glass);
+  border:1px solid rgba(255,255,255,.15);border-radius:22px
+}
+h2{font-size:1.4rem;margin-bottom:22px}
+.item{display:flex;justify-content:space-between;margin:6px 0}
+.item span:first-child{opacity:.75}
+.back-btn{
+  position:fixed;top:18px;left:20px;font-size:28px;color:#fff;
+  text-decoration:none;background:var(--glass);
+  border:1px solid rgba(255,255,255,.15);padding:6px 14px;border-radius:10px;
+  backdrop-filter:blur(var(--blur));
+}
+.back-btn:hover{background:rgba(255,255,255,.15)}
+</style>
+{% endblock %}
+
+{% block body %}
+<a href="/home" class="back-btn"><i class="fa-solid fa-house-chimney-window"></i></a>
+
+<div class="card">
+  <h2>User Profile</h2>
+  <div id="basic">
+    <div class="item"><span>User ID</span><span id="u-id">—</span></div>
+    <div class="item"><span>Name</span><span id="u-name">—</span></div>
+    <div class="item">
+      <span>Email</span>
+      <span>
+       <span id="u-mail">—</span>
+       <a href="/settings/change_email" class="btn btn-sm btn-outline-light ml-2">Change</a>
+    </span>
+    </div>
+  </div>
+
+  <hr style="margin:18px 0;opacity:.3">
+
+  <h2>Vocabulary Level</h2>
+  <div class="item"><span>Estimated Lemmas</span><span id="lemmas">—</span></div>
+  <div class="item"><span>CEFR</span><span id="cefr">—</span></div>
+  <p id="comment" style="margin-top:8px;font-size:.9rem;opacity:.85"></p>
+
+  <hr style="margin:18px 0;opacity:.3">
+
+  <div class="item"><span>Words Studied</span><span id="studied">—</span></div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+fetch('/api/user_summary')
+ .then(r=>r.json())
+ .then(j=>{
+   if(!j.ok) throw Error(j.error||'error');
+   $('#u-id').text(j.user_id);
+   $('#u-name').text(j.name);
+   $('#u-mail').text(j.email);
+   $('#lemmas').text(j.lemmas?.toLocaleString()||'—');
+   $('#cefr').text(j.cefr||'—');
+   $('#comment').text(j.comment||'');
+   $('#studied').text(j.studied.toLocaleString());
+ })
+ .catch(e=>alert('Failed to load profile: '+e.message));
+</script>
+{% endblock %}

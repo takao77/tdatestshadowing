@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block title %}Change E-mail{% endblock %}
+
+{% block head %}
+<style>
+:root{
+  --accent-from:#00e6ff;      /* same gradient as boost / home */
+  --accent-to:#8a35ff;
+  --glass:rgba(255,255,255,.08);
+  --blur:14px;
+}
+body{background:#111;color:#fff}
+
+/* ─────────  背景フローティンググラデ (装飾)  ───────── */
+.bg-float{
+  position:fixed;inset:0;pointer-events:none;z-index:-1;
+  background:radial-gradient( circle at 20% 30%, #00e6ff22 0 20%, transparent 60%),
+             radial-gradient( circle at 80% 70%, #8a35ff22 0 20%, transparent 60%);
+  filter:blur(80px);
+}
+
+/* ─────────  カード本体  ───────── */
+.card{
+  max-width:420px;margin:12vh auto;padding:32px 28px;
+  backdrop-filter:blur(var(--blur));
+  background:var(--glass);
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:26px;
+  box-shadow:0 6px 28px rgb(0 0 0 / .45);
+  text-align:center;
+}
+.card h2{font-size:1.5rem;margin-bottom:22px;letter-spacing:.3px}
+
+/* ─────────  フォーム  ───────── */
+.form-control{
+  background:rgba(255,255,255,.07)!important;
+  border:none;
+  color:#fff;
+
+  /* ▼ サイズを大きくするプロパティ */
+  font-size:1.1rem;       /* 文字を 110 % */
+  padding:14px 18px;      /* 縦 14px, 横 18px */
+  height:auto;            /* Bootstrap の固定 height を打ち消す */
+  border-radius:14px;     /* 角丸も少しアップ */
+}
+.form-control:focus{      /* フォーカス時の装飾はそのまま */
+  box-shadow:0 0 0 2px var(--accent-from);
+  background:rgba(255,255,255,.12);
+}
+
+/* ─────────  Gradient ボタン  ───────── */
+.btn-grad{
+  border:none;width:100%;padding:12px;font-weight:600;
+  background:linear-gradient(135deg,var(--accent-from),var(--accent-to));
+  color:#fff;border-radius:50px;transition:.25s;letter-spacing:.4px;
+    font-size: 1.05rem;
+    padding: 16px 0; /* 高さを合わせる */
+}
+.btn-grad:hover{transform:translateY(-2px);box-shadow:0 0 20px var(--accent-from)}
+.btn-grad:disabled{opacity:.55;transform:none;box-shadow:none}
+
+/* ─────────  戻るアイコン  ───────── */
+.back-btn{
+  position:fixed;top:20px;left:22px;font-size:30px;color:#fff;
+  text-decoration:none;padding:6px 14px;border-radius:12px;
+  background:var(--glass);border:1px solid rgba(255,255,255,.15);
+  backdrop-filter:blur(var(--blur));transition:.25s;
+}
+.back-btn:hover{background:rgba(255,255,255,.15);transform:scale(1.07)}
+
+.form-control + .form-control{
+  margin-top:24px;   /* 好きな値に調整：16〜32px 程度 */
+}
+
+.btn-grad{
+  margin-top:24px;   /* ← 好みで 20〜32px などに変更可 */
+}
+</style>
+{% endblock %}
+
+{% block body %}
+<span class="bg-float"></span>  {# ふわっとした背景装飾 #}
+
+<a href="/settings" class="back-btn"><i class="fa-solid fa-house-chimney-window"></i></a>
+
+<div class="card">
+  <h2>Change&nbsp;E-mail</h2>
+
+  <form id="mail-form" autocomplete="off">
+    <input name="new_email" type="email"
+           class="form-control mb-3" placeholder="new&nbsp;@&nbsp;example.com" required>
+
+    <input name="password" type="password"
+           class="form-control mb-4" placeholder="Current&nbsp;password" required>
+
+    <button class="btn-grad" type="submit">
+      Update&nbsp;&nbsp;and&nbsp;&nbsp;Send&nbsp;Verification&nbsp;Link&nbsp;<i class="fas fa-paper-plane ml-1"></i>
+    </button>
+  </form>
+
+  <div id="mail-msg" class="mt-3" style="min-height:1.4em;font-size:.9rem;"></div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+$('#mail-form').on('submit', async e=>{
+  e.preventDefault();
+  const fd=new FormData(e.target);
+  const btn=$('.btn-grad'); btn.prop('disabled',true).html(
+      '<span class="spinner-border spinner-border-sm"></span>');
+
+  const setMsg=(txt,cls)=>$('#mail-msg').html(`<span class="${cls}">${txt}</span>`);
+
+  try{
+    const res=await fetch('/api/change_email',{method:'POST',body:fd});
+    const j  =await res.json();
+
+    if(res.ok&&j.ok){
+      setMsg('✅ Verification e-mail sent!<br>Check your new inbox.','text-success');
+    }else{
+      const m={
+        wrong_pw:'❌ Password incorrect',
+        duplicate:'❌ Address already in use',
+        bad_email:'❌ Invalid e-mail format',
+        same:'⚠️ Same as current address'
+      }[j.error]||'Error';
+      setMsg(m,'text-danger');
+    }
+  }catch(e){ setMsg('Network error','text-danger'); }
+  finally{btn.prop('disabled',false).html(
+      'Update&nbsp;&nbsp;and&nbsp;&nbsp;Send&nbsp;Verification&nbsp;Link&nbsp;<i class="fas fa-paper-plane ml-1"></i>')}
+});
+</script>
+{% endblock %}

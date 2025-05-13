@@ -49,7 +49,8 @@ h2{font-size:1.4rem;margin-bottom:22px}
 
   <hr style="margin:18px 0;opacity:.3">
 
-  <div class="item"><span>Words Studied</span><span id="studied">—</span></div>
+  <div class="item"><span>Words Studied これまで学んだ語彙数</span><span id="studied">—</span></div>
+    <div class="item"><span>Personal Dictionary パーソナル辞書語彙数</span><span id="personal">—</span></div>
 </div>
 {% endblock %}
 
@@ -66,6 +67,7 @@ fetch('/api/user_summary')
    $('#cefr').text(j.cefr||'—');
    $('#comment').text(j.comment||'');
    $('#studied').text(j.studied.toLocaleString());
+   $('#personal').text((j.personal_dict||0).toLocaleString());
  })
  .catch(e=>alert('Failed to load profile: '+e.message));
 </script>

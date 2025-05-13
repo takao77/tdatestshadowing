@@ -3386,6 +3386,17 @@ def user_summary():
          WHERE user_id = ?
     """, uid)
     studied = cur.fetchone()[0] or 0
+
+    # ── C) パーソナル辞書 (category_id=4) の総語数 ────────────
+    cur.execute("""
+        SELECT COUNT(*)
+          FROM dbo.vocab_items vi
+          JOIN dbo.courses c ON c.id = vi.course_id
+         WHERE c.owner_user_id = ?
+           AND c.category_id   = 4
+    """, uid)
+    personal_cnt = cur.fetchone()[0] or 0
+
     cur.close(); conn.close()
 
     return jsonify({
@@ -3396,7 +3407,8 @@ def user_summary():
         'lemmas':    row.vocab_lemmas,
         'cefr':      row.vocab_cefr,
         'comment':   row.vocab_comment,
-        'studied':   studied
+        'studied':   studied,
+        'personal_dict': personal_cnt  # ★ 追加フィールド
     })
 
 # ─────────────────────────────────────────────────────

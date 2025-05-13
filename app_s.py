@@ -3355,6 +3355,123 @@ def boost_page():
                            user_name=session.get('user_name', ''))
 
 
+@app.route('/settings')
+def settings_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('settings.html')
+
+# ----------------------------------------------------------
+# ② /api/user_summary  … JSON でプロフィール＋学習数
+# ----------------------------------------------------------
+@app.route('/api/user_summary')
+def user_summary():
+    if 'user_id' not in session:
+        return jsonify({'error':'login'}), 403
+    uid = session['user_id']
+
+    conn = get_db_connection(); cur = conn.cursor()
+    # ユーザー基本＋語彙プロフィール
+    cur.execute("""
+        SELECT user_id, name, email,
+               vocab_lemmas, vocab_cefr, vocab_comment
+          FROM dbo.users WHERE id = ?
+    """, uid)
+    row = cur.fetchone()
+
+    # vocab_reviews でユニーク語数
+    cur.execute("""
+        SELECT COUNT(DISTINCT vocab_id)
+          FROM dbo.vocab_reviews
+         WHERE user_id = ?
+    """, uid)
+    studied = cur.fetchone()[0] or 0
+    cur.close(); conn.close()
+
+    return jsonify({
+        'ok': True,
+        'user_id':   row.user_id,
+        'name':      row.name,
+        'email':     row.email,
+        'lemmas':    row.vocab_lemmas,
+        'cefr':      row.vocab_cefr,
+        'comment':   row.vocab_comment,
+        'studied':   studied
+    })
+
+# ─────────────────────────────────────────────────────
+#  /api/change_email  : パスワード確認つきメール変更
+# ─────────────────────────────────────────────────────
+@app.route('/api/change_email', methods=['POST'])
+def change_email():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+
+    uid          = session['user_id']
+    current_pw   = request.form.get('password', '')
+    new_email    = (request.form.get('new_email', '')).strip().lower()
+
+    # --- 0) 形式チェック -------------------------------------------------
+    import re, secrets
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', new_email):
+        return jsonify({'error': 'bad_email'}), 400
+
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # --- 1) 現在パスワード検証 ------------------------------------------
+    cur.execute("SELECT password_hash, email FROM dbo.users WHERE id = ?", uid)
+    row = cur.fetchone()
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if not check_password(current_pw, row.password_hash):
+        return jsonify({'error': 'wrong_pw'}), 401
+
+    if new_email == row.email:
+        return jsonify({'error': 'same'}), 409      # 変更なし
+
+    # --- 2) 既に使われていないか確認 -----------------------------------
+    cur.execute("SELECT 1 FROM dbo.users WHERE email = ?", new_email)
+    if cur.fetchone():
+        return jsonify({'error': 'duplicate'}), 409
+
+    # --- 3) email 更新・再認証フラグ・token 再発行 ----------------------
+    token = secrets.token_urlsafe(32)
+    cur.execute("""
+        UPDATE dbo.users
+           SET email = ?, is_email_verified = 0, verify_token = ?
+         WHERE id = ?
+    """, new_email, token, uid)
+    conn.commit()
+
+    # --- 4) 確認メール送信 ---------------------------------------------
+    verify_link = f"{VERIFY_BASE_URL}?token={token}"
+    mail.send(Message(
+        subject='[Polyagent AI] Confirm your new e-mail address',
+        recipients=[new_email],
+        body=f"""Hi {session.get('user_name','')},
+
+You (or someone) requested to change the e-mail associated with your Polyagent AI account.
+
+Please verify your new address by clicking the link below:
+
+{verify_link}
+
+If you did not request this, you can safely ignore this message.
+"""
+    ))
+
+    cur.close(); conn.close()
+    return jsonify({'ok': True})
+
+
+# settings 用サブページ
+@app.route('/settings/change_email')
+def change_email_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('change_email.html')
+
+
 if __name__ == '__main__':
     app.run(debug=True)
 

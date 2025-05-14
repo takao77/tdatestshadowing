@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}My Dictionary{% endblock %}
+
+{% block head %}
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root{
+  --glass:rgba(255,255,255,.07);
+  --blur :12px;
+}
+body{background:#111;color:#fff}
+
+/* ─────── カード ─────── */
+.card{
+  max-width:960px;margin:8vh auto;padding:26px;
+  backdrop-filter:blur(var(--blur));background:var(--glass);
+  border:1px solid rgba(255,255,255,.12);border-radius:22px;
+}
+
+/* ─────── テーブル ─────── */
+table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;         /* 列幅を固定して Sentence だけ折り返す */
+}
+th,td{
+  padding:8px 10px;
+  border-bottom:1px solid #444;
+  font-size:.92rem;
+}
+th{
+  cursor:pointer;user-select:none;
+  white-space:nowrap;
+}
+th i{margin-left:4px;color:#777}
+table td{vertical-align:top;word-break:break-word;}  /* ← Sentence 折り返し対策 */
+
+th.actions-col,td.actions-col{width:70px;text-align:center}
+
+.delete-icon{
+  color:#9e9e9e;              /* 標準＝灰色 */
+  font-size:20px;
+  cursor:pointer;
+  transition:color .15s,transform .15s;
+}
+.delete-icon:hover{
+  color:#e74c3c;              /* ホバーで赤 */
+  transform:scale(1.15);
+}
+
+/* ─────── 戻るボタン ─────── */
+.back-btn{
+  position:fixed;top:18px;left:20px;font-size:28px;
+  color:#fff;text-decoration:none;
+  background:var(--glass);
+  border:1px solid rgba(255,255,255,.15);
+  padding:6px 14px;border-radius:10px;
+  backdrop-filter:blur(var(--blur));
+}
+.back-btn:hover{background:rgba(255,255,255,.15)}
+</style>
+{% endblock %}
+
+{% block body %}
+<a href="/home" class="back-btn"><i class="fa-solid fa-house-chimney-window"></i></a>
+
+<div class="card">
+  <h2 style="margin-bottom:18px;">My Personal Dictionary</h2>
+
+  <table id="dict-table">
+    <thead>
+      <tr>
+        <th data-key="word">Word <i class="fa fa-sort"></i></th>
+        <th              >Sentence</th>
+        <th data-key="ef">EF <i class="fa fa-sort"></i></th>
+        <th data-key="next">次回復習日 <i class="fa fa-sort"></i></th>
+        <th class="actions-col">Delete</th>
+      </tr>
+    </thead>
+    <tbody id="dict-body">
+      <tr><td colspan="5">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+/* ---------------- util: 並べ替え -------------------------------- */
+function sortRows(key, asc){
+  const rows = Array.from(dictBody.rows);
+  const val = tr=>{
+    if(key==='ef')   return parseFloat(tr.dataset.ef||0);
+    if(key==='next') return tr.dataset.next||'9999';
+    return (tr.dataset.word||'').toLowerCase();
+  };
+  rows.sort((a,b)=> asc ? (val(a)>val(b)?1:-1) : (val(a)<val(b)?1:-1))
+      .forEach(r=>dictBody.appendChild(r));
+}
+
+/* ---------------- 初期ロード ------------------------------------ */
+const dictBody = document.getElementById('dict-body');
+let currentSort = {key:'next', asc:true};
+
+(async()=>{
+  const res = await fetch('/api/personal_vocab/list?sort=created');
+  const js  = await res.json();
+  dictBody.innerHTML='';
+  js.items.forEach(it=>{
+    const tr=document.createElement('tr');
+    tr.dataset.id   = it.id;
+    tr.dataset.word = it.word;
+    tr.dataset.ef   = it.ef;
+    tr.dataset.next = it.next_review||'';
+
+    tr.innerHTML=`
+      <td>${it.word}</td>
+      <td style="white-space:pre-wrap">${it.sentence}</td>
+      <td style="text-align:center">${it.ef.toFixed(2)}</td>
+      <td>${(it.next_review||'').replace('T',' ').slice(0,16)}</td>
+      <td class="actions-col">
+        <i class="fa fa-trash delete-icon" title="この単語を削除"></i>
+      </td>`;
+    dictBody.appendChild(tr);
+  });
+  sortRows('next',true);
+})();
+
+/* ---------------- ヘッダークリックで並べ替え --------------------- */
+document.querySelectorAll('#dict-table thead th[data-key]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const k   = th.dataset.key;
+    const asc = currentSort.key===k ? !currentSort.asc : (k==='word');
+    currentSort={key:k,asc};
+    document.querySelectorAll('#dict-table th i')
+            .forEach(i=>i.className='fa fa-sort');
+    th.querySelector('i').className= asc?'fa fa-sort-up':'fa fa-sort-down';
+    sortRows(k,asc);
+  });
+});
+
+/* ---------------- 行内 Delete（イベントデリゲート） ------------- */
+dictBody.addEventListener('click',e=>{
+  const icon = e.target.closest('.delete-icon');
+  if(!icon) return;
+  const tr   = icon.closest('tr');
+  const id   = tr.dataset.id;
+  const w    = tr.dataset.word;
+  if(!confirm(`"${w}" を削除しますか？（復元できません）`)) return;
+
+  fetch('/api/personal_vocab/delete/'+id,{method:'POST'})
+    .then(r=>r.json())
+    .then(j=>{
+      if(j.ok) tr.remove();
+      else alert(j.error||'error');
+    });
+});
+</script>
+{% endblock %}

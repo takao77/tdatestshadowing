@@ -3235,7 +3235,7 @@ def vocab_candidates():
     flavor_note = {
         'idiom':'Focus on idioms or phrasal verbs. ',
         'slang':'Focus on informal Gen-Z slang. ',
-        'business':'Focus on business English terms. '
+        'business':'Focus on words used in a business context and make sure they match the CEFR target and lemma-size guidance described above. '
     }.get(flavor, '')
 
     base_prompt = (
@@ -3482,6 +3482,131 @@ def change_email_page():
     if 'user_id' not in session:
         return redirect(url_for('login_user'))
     return render_template('change_email.html')
+
+
+# --------------------------------------------------
+#  /dictionary  画面本体
+# --------------------------------------------------
+@app.route('/dictionary')
+def dictionary_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login_user'))
+    return render_template('dictionary.html')
+
+# --------------------------------------------------
+#  /api/personal_vocab/list?sort=ef|created  ← JSON
+# --------------------------------------------------
+@app.route('/api/personal_vocab/list')
+def personal_vocab_list():
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+    uid   = session['user_id']
+    sort  = request.args.get('sort', 'created')   # 既定 = 追加日 DESC
+
+    # ── ① 並べ替えオプションに next を追加 ──
+    order = {
+        'ef'      : 'ISNULL(lat.ef,2.5) DESC',
+        'created' : 'vi.created_at DESC',
+        'word'    : 'vi.word ASC',
+        # next_review が NULL の行は “遠い未来” として末尾に回す
+        'next'    : 'ISNULL(lat.next_review, \'9999-12-31\') ASC'
+    }.get(sort, 'vi.created_at DESC')
+
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute(f"""
+        /* 最新レビュー (EF / next_review) を JOIN して一発で返す */
+        WITH latest AS (
+            SELECT vocab_id,
+                   ef,
+                   next_review,
+                   ROW_NUMBER() OVER (PARTITION BY vocab_id
+                                      ORDER BY review_time DESC) rn
+              FROM dbo.vocab_reviews
+             WHERE user_id = ?
+        )
+        SELECT vi.id,
+               vi.word,
+               vi.sentence,
+               vi.created_at,
+               ISNULL(lat.ef, 2.5)            AS ef,
+               lat.next_review                AS next_review
+          FROM dbo.courses c
+          JOIN dbo.vocab_items vi ON vi.course_id = c.id
+          LEFT JOIN latest      lat ON lat.vocab_id = vi.id AND lat.rn = 1
+         WHERE c.owner_user_id = ? AND c.category_id = 4
+         ORDER BY {order}
+    """, uid, uid)
+
+    rows = [dict(
+                id       = r.id,
+                word     = r.word,
+                sentence = r.sentence,
+                created  = (r.created_at.isoformat() if r.created_at else ''),
+                ef       = float(r.ef),
+                next_review = (r.next_review.isoformat() if r.next_review else '')
+            )
+            for r in cur]
+    cur.close(); conn.close()
+    return jsonify({'ok': True, 'items': rows})
+
+
+@app.route('/api/personal_vocab/master/<int:vocab_id>', methods=['POST'])
+def pvocab_master(vocab_id: int):
+    """
+    『覚えた！』ボタン：
+      • self_score = 5
+      • ef         = 30.0
+      • next_review = 90 日後
+    を vocab_reviews に 1 行 INSERT
+    """
+    if 'user_id' not in session:
+        return jsonify({'error': 'login'}), 403
+    uid = session['user_id']
+
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        # ← 90 日後 (UTC) を計算
+        cur.execute("SELECT DATEADD(day, 90, GETUTCDATE())")
+        next90 = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO dbo.vocab_reviews
+                   (vocab_id, review_time, self_score,
+                    test_score, ef, next_review, user_id)
+            VALUES (?, GETUTCDATE(),         -- 今回のレビュー時刻
+                    5,                      -- self_score = MAX
+                    NULL,                   -- test_score 使わない
+                    30.0,                   -- ★ EF = 30
+                    ?,                      -- ★ 90 日後
+                    ?);                     -- user_id
+        """, vocab_id, next90, uid)
+
+        conn.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        conn.rollback()
+        print('[MASTER ERR]', e)
+        return jsonify({'error': 'db'}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route('/api/personal_vocab/delete/<int:vocab_id>', methods=['POST'])
+def pvocab_delete(vocab_id):
+    if 'user_id' not in session:
+        return jsonify({'error':'login'}), 403
+    uid = session['user_id']
+
+    conn = get_db_connection(); cur = conn.cursor()
+    # パーソナル辞書 (category_id = 4) か & 自分の所有か を確認して削除
+    cur.execute("""
+        DELETE vi
+          FROM dbo.vocab_items vi
+          JOIN dbo.courses c ON c.id = vi.course_id
+         WHERE vi.id = ? AND c.owner_user_id = ? AND c.category_id = 4
+    """, vocab_id, uid)
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'ok': True})
 
 
 if __name__ == '__main__':

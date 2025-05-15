@@ -398,57 +398,47 @@ def generate_idiom(category):
 
     return idiom
 
-def generate_example_sentence(idiom):
-    prompt = f"Provide a sentence using the idiom '{idiom}' in a meaningful context."
+def generate_example_sentence(idiom: str) -> str:
+    uid = session.get('user_id', 0)
+    prompt = f"Provide ONE sentence that naturally uses the idiom \"{idiom}\"."
 
-    headers = {
-        'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY,
-    }
-    data = {
-        "messages": [
-            {"role": "system", "content": "You are an assistant that creates example sentences using provided idioms."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(
-        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
-        headers=headers,
-        json=data
+    messages = [
+        {"role": "system",
+         "content": "You are an assistant that creates natural example sentences."},
+        {"role": "user", "content": prompt}
+    ]
+
+    rsp = safe_chat(
+        user_id    = uid,
+        client     = chat_client,
+        deployment = CHAT_DEPLOY,
+        messages   = messages,
+        max_tokens = 60
+    )
+    return (rsp.choices[0].message.content or "").strip()
+
+def generate_idiom_meaning(idiom: str) -> str:
+    uid = session.get('user_id', 0)
+    prompt = (
+        f'Explain the meaning of the idiom "{idiom}" in simple English, '
+        'then give a concise Japanese translation. '
+        'Return both in ONE paragraph.'
     )
 
-    if response.status_code == 200:
-        response_data = response.json()
-        example_sentence = response_data["choices"][0]["message"]["content"].strip()
-        return example_sentence
-    else:
-        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
+    messages = [
+        {"role": "system",
+         "content": "You are an assistant that explains idioms bilingually."},
+        {"role": "user", "content": prompt}
+    ]
 
-def generate_idiom_meaning(idiom):
-    prompt = f"Provide the meaning of the idiom '{idiom}' in simple English and Japanese."
-
-    headers = {
-        'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_API_KEY,
-    }
-    data = {
-        "messages": [
-            {"role": "system", "content": "You are an assistant that explains the meaning of idioms in both English and Japanese."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(
-        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15",
-        headers=headers,
-        json=data
+    rsp = safe_chat(
+        user_id    = uid,
+        client     = chat_client,
+        deployment = CHAT_DEPLOY,
+        messages   = messages,
+        max_tokens = 120
     )
-
-    if response.status_code == 200:
-        response_data = response.json()
-        meaning = response_data["choices"][0]["message"]["content"].strip()
-        return meaning
-    else:
-        raise Exception(f"Error from OpenAI: {response.status_code}, {response.json()}")
+    return (rsp.choices[0].message.content or "").strip()
 
 
 # ────────────────────────────────────────────
@@ -629,37 +619,38 @@ def translate_word_to_jp(word: str) -> str:
         f'Word: "{word}"'
     )
 
-    url = (
-        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/"
-        f"{AZURE_OPENAI_DEPLOYMENT_NAME}/chat/completions?api-version=2023-05-15"
-    )
-    payload = {
-        "messages": [
-            {"role": "system", "content": "You are a bilingual assistant. "
-                                          "Output ONLY the Japanese translation."},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 30,
-        "temperature": 0.3
-    }
+    messages = [
+        {"role": "system", "content":
+            "You are a bilingual assistant. "
+            "Output ONLY the Japanese translation."},
+        {"role": "user",   "content": prompt}
+    ]
 
     try:
-        res = requests.post(url, headers=HEADERS, json=payload, timeout=15)
-        res.raise_for_status()
+        # ---------- safe_chat で呼び出し ---------------------------------
+        rsp = safe_chat(
+            user_id    = session.get('user_id', 0),  # 未ログインなら 0
+            client     = chat_client,                # gpt‑4o‑mini 側
+            deployment = CHAT_DEPLOY,                # 例: 'tda_4'
+            messages   = messages,
+            max_tokens = 30,                         # 返答は短い 1 行
+            temperature= 0.3
+        )
 
-        jp = (res.json()
-                  .get("choices", [{}])[0]
-                  .get("message", {})
-                  .get("content", "")
-                  .strip())
-
+        jp = (rsp.choices[0].message.content or "").strip()
         if not jp:
             raise ValueError("No content in choices")
 
-        return jp.split('\n')[0]        # 複数行返る場合は先頭行だけ
+        return jp.split('\n')[0]       # 複数行返る場合は先頭行だけ
+
+    except RuntimeError as e:          # 日次クォータ超過など
+        app.logger.warning("translate_word_to_jp quota: %s", e)
+        return word                    # フォールバック
+
     except Exception as e:
         app.logger.warning("translate_word_to_jp failed: %s", e)
-        return word                     # フォールバック
+        return word                    # フォールバック
+
 
 
 # Azure OpenAI 定数は既存のものを再利用
@@ -670,37 +661,36 @@ CHAT_URL = (
 HEADERS  = {"Content-Type": "application/json", "api-key": AZURE_OPENAI_API_KEY}
 
 def ai_pick_token(sentence: str, lemma: str) -> str | None:
-    """
-    GPT に「lemma が句動詞やイディオムなら完全形を返せ」と要求。
-    戻り値が sentence に実在しない or 複数行の場合は None。
-    """
+    uid = session.get('user_id', 0)
     prompt = (
         "From the sentence below, return EXACTLY the token or phrase "
         "that corresponds to the given lemma.\n"
         "- If the lemma is part of a multi-word phrasal verb or idiom, "
-        "return the *whole phrase* as it appears in the sentence.\n"
-        "- Output just that phrase. No extra words, no punctuation."
-        f"\nSentence: {sentence}\nLemma: {lemma}"
+        "return the whole phrase as it appears in the sentence.\n"
+        "- Output JUST that phrase.\n\n"
+        f"Sentence: {sentence}\nLemma: {lemma}"
     )
-    payload = {
-        "messages": [
-            {"role":"system",
-             "content":"You are a precise linguistic extractor. "
-                       "Return only the matched phrase."},
-            {"role":"user","content":prompt}
-        ],
-        "max_tokens": 10,"temperature":0
-    }
+
+    messages = [
+        {"role": "system",
+         "content": "You are a precise linguistic extractor."},
+        {"role": "user", "content": prompt}
+    ]
+
     try:
-        res = requests.post(CHAT_URL, headers=HEADERS, json=payload, timeout=15)
-        res.raise_for_status()
-        phrase = res.json()["choices"][0]["message"]["content"].strip()
-        # 改行・余計な語がないか最小チェック
+        rsp = safe_chat(
+            user_id    = uid,
+            client     = chat_client,
+            deployment = CHAT_DEPLOY,
+            messages   = messages,
+            max_tokens = 20
+        )
+        phrase = (rsp.choices[0].message.content or "").strip()
         if "\n" in phrase or phrase.lower() not in sentence.lower():
             return None
         return phrase
-    except Exception as e:
-        app.logger.info("ai_pick_token error: %s", e)
+    except Exception:
+        app.logger.info("ai_pick_token error")
         return None
 
 
@@ -750,6 +740,97 @@ def make_cloze(sentence: str, lemma: str) -> tuple[str,str]:
 
     # 最後の安全策: 置換せずそのまま
     return sentence, lemma
+
+
+DAILY_LIMITS = {
+    'openai_tokens':  100_000,
+    'speech_chars':   50_000,
+    "vsize_tokens" :  10_000
+}
+
+def _today():
+    return datetime.now(timezone.utc).date()
+
+
+def quota_ok(user_id: int, resource: str, delta: int) -> bool:
+    """
+    delta だけ加算したとき DAILY_LIMITS を超えなければ True
+    """
+    row = fetchone(
+        "SELECT used FROM dbo.api_quota "
+        "WHERE user_id=? AND day_utc=? AND resource=?",
+        user_id, _today(), resource
+    )
+    used = row.used if row else 0
+    return used + delta <= DAILY_LIMITS.get(resource, float("inf"))
+
+def add_usage(user_id: int, resource: str, delta: int) -> None:
+    """
+    MERGE で used をインクリメント（INSERT or UPDATE）
+    """
+    sql = """
+    MERGE dbo.api_quota AS T
+    USING (SELECT ? AS uid, ? AS dy, ? AS rc) S
+      ON (T.user_id=S.uid AND T.day_utc=S.dy AND T.resource=S.rc)
+    WHEN MATCHED THEN UPDATE SET used = T.used + ?
+    WHEN NOT MATCHED THEN
+         INSERT (user_id, day_utc, resource, used)
+         VALUES (S.uid, S.dy, S.rc, ?);
+    """
+    execute(sql, user_id, _today(), resource, delta, delta)
+
+
+# ------------------------- Chat ラッパー -----------------------
+def safe_chat(
+    user_id: int,
+    client: AzureOpenAI,
+    deployment: str,
+    messages: list[dict],
+    *,
+    purpose: str = "openai_tokens",  # ① 資源名を可変に
+    **kw
+):
+    """
+    Azure OpenAI Chat 呼び出しを日次トークン制限付きで実行。
+    - GPT-4(o) 系: max_tokens
+    - o4-mini    : max_completion_tokens
+    いずれも推定に含める。
+    """
+    # ── 1. トークン概算 ──────────────────────────
+    est_prompt = sum(len(m.get("content", "")) // 4 for m in messages)
+    est_resp   = (
+        kw.get("max_tokens") or
+        kw.get("max_completion_tokens") or
+        0
+    )
+    delta = est_prompt + est_resp
+
+    if not quota_ok(user_id, purpose, delta):
+        raise RuntimeError("日次トークン上限を超えました。翌日までお待ち下さい。")
+
+    # ── 2. 実リクエスト ──────────────────────────
+    rsp = client.chat.completions.create(
+        model    = deployment,
+        messages = messages,
+        **kw
+    )
+
+    # ── 3. 実使用トークンで集計 ──────────────────
+    real_used = rsp.usage.prompt_tokens + rsp.usage.completion_tokens
+    add_usage(user_id, purpose, real_used)
+
+    return rsp
+
+# ------------------------- Whisper 秒数 -----------------------
+def safe_stt(user_id: int, audio_sec: int):
+    """
+    Whisper v2 の音声長(秒)をクォータ管理
+    """
+    if "whisper_sec" not in DAILY_LIMITS:        # 制限しない設定
+        return
+    if not quota_ok(user_id, "whisper_sec", audio_sec):
+        raise RuntimeError("Daily STT quota exceeded 🎤")
+    add_usage(user_id, "whisper_sec", audio_sec)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -903,27 +984,27 @@ def generate_sentences():
 
     return jsonify({'sentence': sentence, 'audio': audio_base64})
 
-@app.route('/encourage', methods=['POST'])
-def encourage():
-    try:
-        language = random.choice(['en', 'zh'])
-        message = generate_encouraging_message(language)
-        access_token = get_access_token()
-
-        if language == 'en':
-            language_code = 'en-US'
-            voice_name = 'en-US-AriaNeural'
-        else:
-            language_code = 'zh-CN'
-            voice_name = 'zh-CN-XiaoxiaoNeural'
-
-        audio_content = generate_speech(message, access_token, language_code, voice_name, style='whispering')
-        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    return jsonify({'message': message, 'audio': audio_base64})
+# @app.route('/encourage', methods=['POST'])
+# def encourage():
+#     try:
+#         language = random.choice(['en', 'zh'])
+#         message = generate_encouraging_message(language)
+#         access_token = get_access_token()
+#
+#         if language == 'en':
+#             language_code = 'en-US'
+#             voice_name = 'en-US-AriaNeural'
+#         else:
+#             language_code = 'zh-CN'
+#             voice_name = 'zh-CN-XiaoxiaoNeural'
+#
+#         audio_content = generate_speech(message, access_token, language_code, voice_name, style='whispering')
+#         audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+#
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+#
+#     return jsonify({'message': message, 'audio': audio_base64})
 
 @app.route('/get_idiom', methods=['POST'])
 def get_idiom():
@@ -2081,12 +2162,19 @@ Respond JSON: {{"reply":..., "score":n, "jp_hint":...}}
              [{"role":h['role'],"content":h['text']} for h in history] + \
              [{"role":"user","content":user_text}]
 
-    chat = chat_client.chat.completions.create(
-        model=CHAT_DEPLOY,
-        messages=messages,
-        temperature=0.7,
-        response_format={"type":"json_object"}
-    )
+    try:
+        chat = safe_chat(
+            user_id    = session.get('user_id', 0),  # 未ログインなら 0
+            client     = chat_client,                # gpt-4o-mini 用クライアント
+            deployment = CHAT_DEPLOY,                # 例: "tda_4"
+            messages   = messages,
+            max_tokens = 1000,
+            temperature= 0.7,
+            response_format={"type": "json_object"}
+        )
+    except RuntimeError as e:                       # 日次トークン上限超過など
+        return jsonify({"error": str(e)}), 429
+
     jres=json.loads(chat.choices[0].message.content)
     ai_text = jres.get('reply','')
     score   = int(jres.get('score',3))
@@ -2207,10 +2295,13 @@ def sakura_teacher_inner(sentence: str, words: list[str]) -> dict:
         "2)Words について一つずつ意味を解説してください\n"
         "Wordsについて、カタカナを使って解説しないでください\n"
     )
-    gpt = chat_client.chat.completions.create(
-        model=CHAT_DEPLOY,
-        messages=[{"role":"system","content":sys_prompt}],
-        temperature=0.7,
+    gpt = safe_chat(
+        user_id=session.get('user_id', 0),
+        client=chat_client,
+        deployment=CHAT_DEPLOY,  # "tda_4"
+        messages=[{"role": "system", "content": sys_prompt}],
+        max_tokens=400,
+        temperature=0.7
     )
     jp_text = gpt.choices[0].message.content.strip()
 
@@ -2516,32 +2607,51 @@ BACKUP_REAL = [
 
 # ----------------- ③ GPT に 10 語生成させるヘルパ ---------------
 def gpt_ten_words() -> list[dict]:
-    """4o-mini で REAL 5 + FAKE 5 を生成して list[dict] を返す"""
+    """
+    REAL 5 ＋ FAKE 5 を o4-mini で生成して返す。
+    返り値例:
+      [{'word': 'angle', 'fake': False}, …]  ← 必ず 10 要素
+    """
     prompt = (
         "Return exactly 10 items as ONE JSON array. "
         "First 5 are REAL English lemmas (\"fake\":false). "
         "Next 5 are plausible pseudo-words (\"fake\":true). "
-        'Format: [{"word":"angle","fake":false}, … ]'
+        "Format: [{\"word\":\"angle\",\"fake\":false}, … ]"
     )
-    rsp = client.chat.completions.create(
-        model   = DEPLOY_CHAT,
-        messages=[{"role":"user","content":prompt}],
-        max_completion_tokens = 4000,
-        response_format       = {"type":"json_object"}
-    )
-    obj = json.loads(rsp.choices[0].message.content)
-    items = obj["words"] if isinstance(obj,dict) else obj
-    # フィルタリング：単語だけを確実に抜き重複除去
+
+    # ── ★ ここだけ safe_chat で呼び出す ─────────────────
+    try:
+        rsp = safe_chat(
+            user_id    = session.get('user_id', 0),   # 未ログインなら 0
+            client     = o4_client,                   # o4-mini 用クライアント
+            deployment = O4_DEPLOY,                   # "o4-mini"
+            messages   = [{"role": "user", "content": prompt}],
+            max_completion_tokens = 3000
+        )
+        raw = (rsp.choices[0].message.content or "").strip()
+    except RuntimeError as e:                         # 日次上限など
+        app.logger.warning("gpt_ten_words quota: %s", e)
+        return []                                    # 呼び元で再試行
+
+    # ── JSON パース & 最低限のバリデーション ────────────
+    try:
+        obj   = json.loads(raw)
+        items = obj["words"] if isinstance(obj, dict) else obj
+    except Exception:
+        app.logger.warning("gpt_ten_words JSON parse fail: %s", raw[:120])
+        return []                                    # 呼び元で再試行
+
     out, seen = [], set()
     for it in items:
-        w   = str(it.get("word","")).strip()
-        f   = bool(it.get("fake",False))
+        w = str(it.get("word", "")).strip()
+        f = bool(it.get("fake", False))
         if w and w.lower() not in seen:
             seen.add(w.lower())
-            out.append({"word":w,"fake":f})
+            out.append({"word": w, "fake": f})
         if len(out) == 10:
             break
-    return out
+
+    return out if len(out) == 10 else []
 
 # ----------------- ④ Flask ルート -------------------------------
 @app.route("/api/vsize/start")
@@ -2628,6 +2738,8 @@ def vsize_report():
     """
     data = request.get_json(force=True) or {}
 
+    uid = session.get('user_id', 0)
+
     sys_prompt = (
         "あなたは英語教育の専門家です。日本語母語話者の学習者に向けて、"
         "語彙診断の結果を踏まえた詳細な学習アドバイスを作成してください。"
@@ -2650,14 +2762,24 @@ def vsize_report():
 {json.dumps(data, ensure_ascii=False)}
 """
 
-    rsp = o4_client.chat.completions.create(
-        model = O4_DEPLOY,                 # "o4-mini"
-        messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user",   "content": user_prompt}
-        ],
-        max_completion_tokens = 4000        # o4-mini は *completion* のみ許可
-    )
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user",   "content": user_prompt}
+    ]
+
+    try:
+        rsp = safe_chat(
+            user_id=uid,  # ← 呼び出しユーザー
+            client=o4_client,  # ← どのリソースか
+            deployment=O4_DEPLOY,  # ← デプロイ名
+            messages=messages,
+            max_completion_tokens=3000,
+            purpose="vsize_tokens"
+        )
+    except RuntimeError as e:  # 日次上限を超えたとき
+        return jsonify({"error": str(e)}), 429
+
+
 
     report_text = (rsp.choices[0].message.content or "").strip()
     return jsonify({"report": report_text})
@@ -3112,12 +3234,21 @@ def vocab_profile_api():
         "comment MUST be ≤40 English words."
     )
 
-    rsp = o4_client.chat.completions.create(
-        model   = O4_DEPLOY,                        # 例: "o4-mini"
-        messages=[{"role": "system", "content": prompt}],
-        max_completion_tokens = 2000,
-        response_format       = {"type": "json_object"}
-    )
+    # ① ユーザー ID を取得
+    uid = session.get('user_id', 0)
+
+    # ② safe_chat に置き換え
+    try:
+        rsp = safe_chat(
+            user_id=uid,  # ← クォータを引く対象
+            client=o4_client,  # ← どのリソースか
+            deployment=O4_DEPLOY,  # ← "o4-mini"
+            messages=[{"role": "system", "content": prompt}],
+            max_completion_tokens=2000,
+            response_format={"type": "json_object"}
+        )
+    except RuntimeError as e:  # 上限超過など
+        return jsonify({"error": str(e)}), 429
 
     try:
         data = json.loads(rsp.choices[0].message.content)
@@ -3156,23 +3287,39 @@ def vocab_profile_cached():
     uid = session['user_id']
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""
-        SELECT vocab_lemmas, vocab_cefr, vocab_comment,
+        SELECT vocab_lemmas,
+               vocab_cefr,
+               vocab_comment,
                vocab_profile_updated
-          FROM dbo.users WHERE id = ?
+          FROM dbo.users
+         WHERE id = ?
     """, uid)
     row = cur.fetchone()
     cur.close(); conn.close()
 
+    # 1) まだプロフィールが無ければ再計算を促す
     if not row or row.vocab_lemmas is None:
-        return jsonify({'ok': False})              # まだ未計算
+        return jsonify({'ok': False})      # → フロント側が /profile を再呼び出し
 
-    return jsonify({
-        'ok': True,
-        'lemmas':   int(row.vocab_lemmas),
-        'cefr':     row.vocab_cefr or '',
-        'comment':  row.vocab_comment or '',
-        'updated':  row.vocab_profile_updated.isoformat() if row.vocab_profile_updated else ''
-    })
+    # 2) 「古さ」を 60 日で判定（aware / naive どちらでも動くように調整）
+    last = row.vocab_profile_updated
+    if last:                               # last が None の可能性もある
+        if last.tzinfo is None:            # ← naive なら UTC とみなして tzinfo 付与
+            last = last.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)   # aware
+        if (now - last) < timedelta(days=60):
+            # ── キャッシュをそのまま返却 ─────────────────────
+            return jsonify({
+                'ok': True,
+                'lemmas':   int(row.vocab_lemmas),
+                'cefr':     row.vocab_cefr or '',
+                'comment':  row.vocab_comment or '',
+                'updated':  last.isoformat()
+            })
+
+    # 3) 60 日を超えている（または updated が None）→ 再計算を促す
+    return jsonify({'ok': False})
 
 
 def norm(w:str)->str:
@@ -3250,12 +3397,22 @@ def vocab_candidates():
 
     # ── ④ 最大 3 回まで試行 ──────────────────────────
     for attempt in range(3):
-        rsp = o4_client.chat.completions.create(
-            model   = O4_DEPLOY,
-            messages=[{"role":"system","content":base_prompt}],
-            max_completion_tokens = 2000,
-            response_format       = {"type":"json_object"}
-        )
+        # ① セッションからユーザー ID
+        uid = session.get('user_id', 0)
+
+        # ② safe_chat で呼び出し
+        try:
+            rsp = safe_chat(
+                user_id=uid,
+                client=o4_client,
+                deployment=O4_DEPLOY,
+                messages=[{"role": "system", "content": base_prompt}],
+                max_completion_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+        except RuntimeError as e:
+            # 上限超過 → その場で 429 を返す
+            return jsonify({"error": str(e)}), 429
         try:
             words_raw = json.loads(rsp.choices[0].message.content).get('words', [])
         except Exception:
@@ -3304,12 +3461,21 @@ def vocab_examples():
         "Return ONE JSON object mapping words to sentences.\n\n"
         f"Words: {', '.join(words)}"
     )
-    rsp = o4_client.chat.completions.create(
-        model   = O4_DEPLOY,
-        messages=[{"role":"system","content":prompt}],
-        max_completion_tokens=2000,
-        response_format={"type":"json_object"}
-    )
+
+    uid = session.get('user_id', 0)  # 未ログインなら 0
+
+    try:
+        rsp = safe_chat(
+            user_id=uid,
+            client=o4_client,
+            deployment=O4_DEPLOY,
+            messages=[{"role": "system", "content": prompt}],
+            max_completion_tokens=3000,
+            response_format={"type": "json_object"}
+        )
+    except RuntimeError as e:
+        # トークン上限などで safe_chat が例外を出した場合
+        return jsonify({"error": str(e)}), 429
     try:
         obj = json.loads(rsp.choices[0].message.content)
     except Exception:
